@@ -9,7 +9,7 @@ use std::time::Duration;
 /// # Example
 ///
 /// ```rust
-/// # use rfesi::prelude::EsiBuilder;
+/// # use esi_openapi::prelude::EsiBuilder;
 /// let mut esi = EsiBuilder::new()
 ///     .user_agent("some user agent")
 ///     .client_id("your_client_id")
@@ -29,7 +29,7 @@ use std::time::Duration;
 /// this builder supports setting that struct:
 ///
 /// ```rust
-/// # use rfesi::prelude::EsiBuilder;
+/// # use esi_openapi::prelude::EsiBuilder;
 /// # let your_spec = serde_json::from_str(r#"{"paths": {}}"#).unwrap();
 /// let mut esi = EsiBuilder::new()
 ///     .user_agent("some user agent")
@@ -54,7 +54,7 @@ use std::time::Duration;
 /// those parameters:
 ///
 /// ```rust
-/// # use rfesi::prelude::EsiBuilder;
+/// # use esi_openapi::prelude::EsiBuilder;
 /// let mut esi = EsiBuilder::new()
 ///     .user_agent("some user agent")
 ///     .build()
@@ -218,19 +218,12 @@ impl EsiBuilder {
             );
             map
         };
-        #[cfg(not(feature = "rustls-tls"))]
-        let client = Client::builder()
+        let builder = Client::builder()
             .timeout(http_timeout)
-            .default_headers(headers)
-            .build()?;
-
+            .default_headers(headers);
         #[cfg(feature = "rustls-tls")]
-        let client = Client::builder()
-            .timeout(http_timeout)
-            .default_headers(headers)
-            .use_rustls_tls()
-            .build()?;
-        Ok(client)
+        let builder = builder.tls_backend_rustls();
+        Ok(builder.build()?)
     }
 
     /// Construct the `Esi` instance.
@@ -261,7 +254,7 @@ mod tests {
         assert_eq!(b.client_id, Some(String::from("a")));
         assert_eq!(b.client_secret, Some(String::from("b")));
         assert_eq!(b.callback_url, Some(String::from("c")));
-        assert_eq!(b.compatibility_date, "2025-08-26");
+        assert_eq!(b.compatibility_date, "2026-08-18");
         assert_eq!(b.access_token, None);
         assert_eq!(b.spec, None);
     }
@@ -279,8 +272,8 @@ mod tests {
             "https://login.eveonline.com/v2/oauth/authorize"
         );
         assert_eq!(b.token_url, "https://login.eveonline.com/v2/oauth/token");
-        assert_eq!(b.spec_url, "https://esi.evetech.net/latest/swagger.json");
-        assert_eq!(b.compatibility_date, "2025-08-26");
+        assert_eq!(b.spec_url, "https://esi.evetech.net/meta/openapi.json");
+        assert_eq!(b.compatibility_date, "2026-08-18");
         assert_eq!(b.access_token, None);
         assert_eq!(b.spec, None);
     }
@@ -331,7 +324,7 @@ mod tests {
     #[test]
     fn test_builder_from_json_filled() {
         let json = r#"{
-            "compatibility_date": "2025-08-26",
+            "compatibility_date": "2026-08-18",
             "client_id": "a",
             "client_secret": "b",
             "callback_url": "c",
@@ -345,7 +338,7 @@ mod tests {
           }"#;
         let actual: EsiBuilder = serde_json::from_str(json).unwrap();
         let expected = EsiBuilder::new()
-            .compatibility_date("2025-08-26")
+            .compatibility_date("2026-08-18")
             .client_id("a")
             .client_secret("b")
             .callback_url("c")

@@ -53,7 +53,7 @@ impl IndustryGroup<'_> {
         /// Returns a list of solar systems with the cost index for every
         /// activity
         get_industry_systems,
-        "get_industry_systems",
+        "GetIndustrySystems",
         RequestType::Public,
         Vec<IndustrialSystem>,
     );
@@ -61,7 +61,7 @@ impl IndustryGroup<'_> {
     api_get!(
         /// List industry jobs placed by a character
         get_character_industry_jobs,
-        "get_characters_character_id_industry_jobs",
+        "GetCharactersCharacterIdIndustryJobs",
         RequestType::Authenticated,
         Vec<IndustryJob>,
         (character_id: i32) => "{character_id}";

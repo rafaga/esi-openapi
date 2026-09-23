@@ -8,13 +8,20 @@ pub struct UserInterfaceGroup<'a> {
 impl UserInterfaceGroup<'_> {
     /// Open the market details window.
     pub async fn open_market_details_window(&self, type_id: i32) -> EsiResult<()> {
-        // not using the macro since it doesn't like no body
+        // not using the macro since it doesn't like no body;
+        // `type_id` is a query parameter, not part of the path
         let path = self
             .esi
-            .get_endpoint_for_op_id("post_ui_openwindow_marketdetails")?
-            .replace("{type_id}", &type_id.to_string());
+            .get_endpoint_for_op_id("PostUiOpenwindowMarketdetails")?;
+        let type_id = type_id.to_string();
         self.esi
-            .query("POST", RequestType::Authenticated, &path, None, None)
+            .query(
+                "POST",
+                RequestType::Authenticated,
+                &path,
+                Some(&[("type_id", type_id.as_str())]),
+                None,
+            )
             .await
     }
 }

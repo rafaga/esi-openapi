@@ -3,8 +3,8 @@
 ///
 /// # Example
 /// ```rust,no_run
-/// # use rfesi::prelude::*;
-/// # use rfesi::api_get;
+/// # use esi_openapi::prelude::*;
+/// # use esi_openapi::api_get;
 /// pub struct SomeGroup<'a> {
 ///     pub(crate) esi: &'a Esi,
 /// }
@@ -41,8 +41,8 @@
 /// # Example
 ///
 /// ```rust,no_run
-/// # use rfesi::prelude::*;
-/// # use rfesi::api_get;
+/// # use esi_openapi::prelude::*;
+/// # use esi_openapi::api_get;
 /// pub struct SomeGroup<'a> {
 ///     pub(crate) esi: &'a Esi,
 /// }
@@ -83,8 +83,8 @@
 /// # Example
 ///
 /// ```rust,no_run
-/// # use rfesi::prelude::*;
-/// # use rfesi::api_get;
+/// # use esi_openapi::prelude::*;
+/// # use esi_openapi::api_get;
 /// pub struct SomeGroup<'a> {
 ///     pub(crate) esi: &'a Esi,
 /// }
@@ -204,8 +204,8 @@ macro_rules! api_get {
 /// # Example
 ///
 /// ```rust,no_run
-/// # use rfesi::prelude::*;
-/// # use rfesi::api_post;
+/// # use esi_openapi::prelude::*;
+/// # use esi_openapi::api_post;
 /// pub struct SomeGroup<'a> {
 ///     pub(crate) esi: &'a Esi,
 /// }

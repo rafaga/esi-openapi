@@ -8,16 +8,19 @@ pub struct CharacterGroup<'a> {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct CharacterPublicInfo {
+    pub achievement_score: Option<i64>,
     pub alliance_id: Option<i32>,
     pub birthday: String,
     pub bloodline_id: i32,
+    pub character_title_id: Option<String>,
     pub corporation_id: i32,
+    pub corporation_title: Option<String>,
     pub description: Option<String>,
+    pub faction_id: Option<i32>,
     pub gender: String,
     pub name: String,
     pub race_id: u16,
     pub security_status: Option<f64>,
-    pub title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,7 +96,7 @@ impl CharacterGroup<'_> {
     api_get!(
         /// Get a character's public information.
         get_public_info,
-        "get_characters_character_id",
+        "GetCharactersDetail",
         RequestType::Public,
         CharacterPublicInfo,
         (character_id: i32) => "{character_id}"
@@ -102,7 +105,7 @@ impl CharacterGroup<'_> {
     api_get!(
         /// Get a character's corporation history.
         get_history,
-        "get_characters_character_id_corporationhistory",
+        "GetCharactersCharacterIdCorporationhistory",
         RequestType::Public,
         Vec<CharacterCorporationHistoryItem>,
         (character_id: i32) => "{character_id}"
@@ -111,7 +114,7 @@ impl CharacterGroup<'_> {
     api_get!(
         /// Get a character's portrait URLs on the image server.
         get_portrait,
-        "get_characters_character_id_portrait",
+        "GetCharactersCharacterIdPortrait",
         RequestType::Public,
         CharacterPortraitInfo,
         (character_id: i32) => "{character_id}"
@@ -120,7 +123,7 @@ impl CharacterGroup<'_> {
     api_post!(
         /// Get character affiliations.
         get_affiliation,
-        "post_characters_affiliation",
+        "PostCharactersAffiliation",
         RequestType::Public,
         Vec<CharacterAffiliation>,
         ,
@@ -130,7 +133,7 @@ impl CharacterGroup<'_> {
     api_get!(
         /// Get character blueprints.
         get_blueprints,
-        "get_characters_character_id_blueprints",
+        "GetCharactersCharacterIdBlueprints",
         RequestType::Authenticated,
         Vec<Blueprint>,
         (character_id: i32) => "{character_id}"
@@ -139,7 +142,7 @@ impl CharacterGroup<'_> {
     api_get!(
         /// Get character notifications.
         get_notifications,
-        "get_characters_character_id_notifications",
+        "GetCharactersCharacterIdNotifications",
         RequestType::Authenticated,
         Vec<Notification>,
         (character_id: i32) => "{character_id}"
@@ -148,7 +151,7 @@ impl CharacterGroup<'_> {
     api_get!(
         /// Get character wallet transactions.
         get_wallet_transactions,
-        "get_characters_character_id_wallet_transactions",
+        "GetCharactersCharacterIdWalletTransactions",
         RequestType::Authenticated,
         Vec<WalletTransaction>,
         (character_id: i32) => "{character_id}"

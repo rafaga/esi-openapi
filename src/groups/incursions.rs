@@ -23,7 +23,7 @@ impl IncursionsGroup<'_> {
     api_get!(
         /// Get the current incursions.
         list,
-        "get_incursions",
+        "GetIncursions",
         RequestType::Public,
         Vec<Incursion>,
     );

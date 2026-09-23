@@ -66,7 +66,7 @@ impl MarketGroup<'_> {
     api_get!(
         /// Get a list of historical market statistics for the specified type in a region
         get_region_history,
-        "get_markets_region_id_history",
+        "GetMarketsRegionIdHistory",
         RequestType::Public,
         Vec<HistoryItem>,
         (region_id: i32) => "{region_id}";
@@ -76,7 +76,7 @@ impl MarketGroup<'_> {
     api_get!(
         /// Get a list of orders in a region
         get_region_orders,
-        "get_markets_region_id_orders",
+        "GetMarketsRegionIdOrders",
         RequestType::Public,
         Vec<MarketOrder>,
         (region_id: i32) => "{region_id}";
@@ -88,7 +88,7 @@ impl MarketGroup<'_> {
     api_get!(
         /// Get a list of average and adjusted prices
         get_market_prices,
-        "get_markets_prices",
+        "GetMarketsPrices",
         RequestType::Public,
         Vec<PriceItem>,
     );
@@ -96,7 +96,7 @@ impl MarketGroup<'_> {
     api_get!(
         /// List open market orders placed by a character
         get_character_orders,
-        "get_characters_character_id_orders",
+        "GetCharactersCharacterIdOrders",
         RequestType::Authenticated,
         Vec<CharacterOrder>,
         (character_id: i32) => "{character_id}"
