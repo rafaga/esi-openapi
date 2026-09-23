@@ -19,14 +19,14 @@ pub struct Skill {
 pub struct Skills {
     pub skills: Vec<Skill>,
     pub total_sp: i64,
-    pub unallocated_sp: i32,
+    pub unallocated_sp: Option<i32>,
 }
 
 impl SkillsGroup<'_> {
     api_get!(
         /// Get character skills.
         get_skills,
-        "get_characters_character_id_skills",
+        "GetCharactersCharacterIdSkills",
         RequestType::Authenticated,
         Skills,
         (character_id: i32) => "{character_id}"

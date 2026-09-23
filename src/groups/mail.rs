@@ -11,9 +11,10 @@ pub struct MailGroup<'a> {
 /// Information about all mail labels.
 pub struct MailLabels {
     /// List of individual mail labels.
+    #[serde(default)]
     pub labels: Vec<MailLabel>,
     /// Total unread count across all labels.
-    pub unread_count: Option<i32>,
+    pub total_unread_count: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -35,7 +36,7 @@ impl MailGroup<'_> {
         /// Return a list of the users mail labels, unread counts for each
         /// label and a total unread count.
         get_character_mail_labels,
-        "get_characters_character_id_mail_labels",
+        "GetCharactersCharacterIdMailLabels",
         RequestType::Authenticated,
         MailLabels,
         (character_id: i32) => "{character_id}"

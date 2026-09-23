@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// Errors that can occur when dealing with ESI.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum EsiError {
     /// Error that can be thrown if the `EsiBuilder` struct is
     /// invalid when `.build()` is called.
@@ -38,7 +39,7 @@ pub enum EsiError {
     #[error("Invalid HTTP header value")]
     InvalidUserAgentHeader(#[from] http::header::InvalidHeaderValue),
     /// Error for if the underlying `reqwest::Client` could not be constructed.
-    #[error("Error constructing HTTP client")]
+    #[error("HTTP client error: {0}")]
     ReqwestError(#[from] reqwest::Error),
     /// Error for if the String cannot be converted into a valid HTTP method.
     #[error("Invalid HTTP method")]
@@ -47,11 +48,11 @@ pub enum EsiError {
     /// but no access token is present in the Esi struct.
     #[error("This endpoint requires an access token")]
     MissingAuthentication,
-    /// Error for not finding the passed operationId in the ESI Swagger spec.
+    /// Error for not finding the passed operationId in the ESI OpenAPI spec.
     #[error("Could not resolve operationId '{0}' to a URL path")]
     UnknownOperationID(String),
-    /// Error for being unable to parse the Swagger spec from ESI.
-    #[error("Error occurred while parsing the Swagger spec at: {0}")]
+    /// Error for being unable to parse the OpenAPI spec from ESI.
+    #[error("Error occurred while parsing the OpenAPI spec at: {0}")]
     FailedSpecParse(String),
     /// Error for being unable to parse JSON from anywhere.
     #[error("Failed to serialize/deserialize JSON; this may be due to unexpected data or invalid struct field(s)")]
@@ -68,6 +69,16 @@ pub enum EsiError {
     /// Error for enforcing ESI error limit
     #[error("Refusing to process request as we are error limited for {0}ms")]
     ErrorLimited(i64),
+    /// ESI answered `429 Too Many Requests`: the rate-limit bucket for this
+    /// route group is empty. Wait `retry_after_secs` (from the `Retry-After`
+    /// header, when present) before calling routes in `group` again.
+    #[error("Rate limited by ESI (group: {group:?}, retry after: {retry_after_secs:?}s)")]
+    RateLimited {
+        /// Rate-limit group from the `X-Ratelimit-Group` header, if present.
+        group: Option<String>,
+        /// Seconds to wait, from the `Retry-After` header, if present.
+        retry_after_secs: Option<u64>,
+    },
     /// Error for the access token being used after expiring (and therefore
     /// being unable to be used for ESI) and no refresh token being present
     /// to fetch another access token.

@@ -28,7 +28,7 @@ impl AllianceGroup<'_> {
     api_get!(
         /// Get a list of alliance IDs.
         list_ids,
-        "get_alliances",
+        "GetAlliances",
         RequestType::Public,
         Vec<i32>,
     );
@@ -36,7 +36,7 @@ impl AllianceGroup<'_> {
     api_get!(
         /// Get public information about an alliance.
         get_info,
-        "get_alliances_alliance_id",
+        "GetAlliancesAllianceId",
         RequestType::Public,
         AllianceInfo,
         (alliance_id: i32) => "{alliance_id}"
@@ -45,7 +45,7 @@ impl AllianceGroup<'_> {
     api_get!(
         /// Get list of corporation IDs in an alliance.
         get_alliance_corporations,
-        "get_alliances_alliance_id_corporations",
+        "GetAlliancesAllianceIdCorporations",
         RequestType::Public,
         Vec<i32>,
         (alliance_id: i32) => "{alliance_id}"
@@ -54,7 +54,7 @@ impl AllianceGroup<'_> {
     api_get!(
         /// Get paths to the alliance's icons on the image server.
         get_alliance_icons,
-        "get_alliances_alliance_id_icons",
+        "GetAlliancesAllianceIdIcons",
         RequestType::Public,
         AllianceIcons,
         (alliance_id: i32) => "{alliance_id}"

@@ -1,5 +1,5 @@
+use esi_openapi::prelude::*;
 use log::info;
-use rfesi::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,7 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pretty_env_logger::init();
 
     let esi = EsiBuilder::new()
-        .user_agent("github.com/celeo/rfesi :: example :: auth_fresh")
+        .user_agent("github.com/rafaga/esi-openapi :: example :: auth_fresh")
         .client_id("abc")
         .client_secret("def")
         .callback_url("http://localhost:5000/esi/callback")

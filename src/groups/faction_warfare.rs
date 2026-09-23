@@ -111,7 +111,7 @@ impl FactionWarfareGroup<'_> {
     api_get!(
         /// Get the top 4 leaderboards of factions for total, last week, and yesterday.
         leaderboards,
-        "get_fw_leaderboards",
+        "GetFwLeaderboards",
         RequestType::Public,
         FWLeaderboards,
     );
@@ -119,7 +119,7 @@ impl FactionWarfareGroup<'_> {
     api_get!(
         /// Get top 100 characters for total, last week, and yesterday.
         leaderboard_characters,
-        "get_fw_leaderboards_characters",
+        "GetFwLeaderboardsCharacters",
         RequestType::Public,
         FWCharacterLeaderboards,
     );
@@ -127,7 +127,7 @@ impl FactionWarfareGroup<'_> {
     api_get!(
         /// Get top 10 corporations for total, last week, and yesterday.
         leaderboard_corporations,
-        "get_fw_leaderboards_corporations",
+        "GetFwLeaderboardsCorporations",
         RequestType::Public,
         FWCorporationLeaderboards,
     );
@@ -135,7 +135,7 @@ impl FactionWarfareGroup<'_> {
     api_get!(
         /// Get FW overview stats.
         stats,
-        "get_fw_stats",
+        "GetFwStats",
         RequestType::Public,
         Vec<FWStatsItem>,
     );
@@ -143,7 +143,7 @@ impl FactionWarfareGroup<'_> {
     api_get!(
         /// Get FW system ownership.
         systems,
-        "get_fw_systems",
+        "GetFwSystems",
         RequestType::Public,
         Vec<FWSystem>,
     );
@@ -151,7 +151,7 @@ impl FactionWarfareGroup<'_> {
     api_get!(
         /// Get FW faction information.
         wars,
-        "get_fw_wars",
+        "GetFwWars",
         RequestType::Public,
         Vec<FWWar>,
     );

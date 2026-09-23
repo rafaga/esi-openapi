@@ -34,7 +34,7 @@ impl LocationGroup<'_> {
     api_get!(
         /// Get the character's location.
         get_location,
-        "get_characters_character_id_location",
+        "GetCharactersCharacterIdLocation",
         RequestType::Authenticated,
         LocationInfo,
         (character_id: i32) => "{character_id}"
@@ -43,7 +43,7 @@ impl LocationGroup<'_> {
     api_get!(
         /// Get if the character is currently online.
         get_online,
-        "get_characters_character_id_online",
+        "GetCharactersCharacterIdOnline",
         RequestType::Authenticated,
         OnlineStatus,
         (character_id: i32) => "{character_id}"
@@ -52,7 +52,7 @@ impl LocationGroup<'_> {
     api_get!(
         /// Get the player's current ship.
         get_ship,
-        "get_characters_character_id_ship",
+        "GetCharactersCharacterIdShip",
         RequestType::Authenticated,
         CurrentShip,
         (character_id: i32) => "{character_id}"

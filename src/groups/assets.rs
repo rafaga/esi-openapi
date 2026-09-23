@@ -44,7 +44,7 @@ impl AssetsGroup<'_> {
     api_get!(
         /// Get a character's assets.
         get_character_assets,
-        "get_characters_character_id_assets",
+        "GetCharactersCharacterIdAssets",
         RequestType::Authenticated,
         Vec<Asset>,
         (character_id: i32) => "{character_id}"
@@ -53,7 +53,7 @@ impl AssetsGroup<'_> {
     api_post!(
         /// Get locations of some of a character's assets.
         get_character_assets_locations,
-        "post_characters_character_id_assets_locations",
+        "PostCharactersCharacterIdAssetsLocations",
         RequestType::Authenticated,
         Vec<AssetLocation>,
         (character_id: i32) => "{character_id}",
@@ -63,7 +63,7 @@ impl AssetsGroup<'_> {
     api_post!(
         /// Get names of some of a character's assets.
         get_character_assets_names,
-        "post_characters_character_id_assets_names",
+        "PostCharactersCharacterIdAssetsNames",
         RequestType::Authenticated,
         Vec<AssetName>,
         (character_id: i32) => "{character_id}",
@@ -75,7 +75,7 @@ impl AssetsGroup<'_> {
         ///
         /// Requires the auth'd character to be a director/+ in the corp.
         get_corporation_assets,
-        "get_corporations_corporation_id_assets",
+        "GetCorporationsCorporationIdAssets",
         RequestType::Authenticated,
         Vec<Asset>,
         (corporation_id: u64) => "{corporation_id}"
@@ -86,7 +86,7 @@ impl AssetsGroup<'_> {
         ///
         /// Requires the auth'd character to be a director/+ in the corp.
         get_corporation_assets_locations,
-        "post_corporations_corporation_id_assets_locations",
+        "PostCorporationsCorporationIdAssetsLocations",
         RequestType::Authenticated,
         Vec<AssetLocation>,
         (corporation_id: u64) => "{corporation_id}",
@@ -98,7 +98,7 @@ impl AssetsGroup<'_> {
         ///
         /// Requires the auth'd character to be a director/+ in the corp.
         get_corporation_assets_names,
-        "post_corporations_corporation_id_assets_names",
+        "PostCorporationsCorporationIdAssetsNames",
         RequestType::Authenticated,
         Vec<AssetName>,
         (corporation_id: u64) => "{corporation_id}",

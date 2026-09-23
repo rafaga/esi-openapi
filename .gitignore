@@ -2,3 +2,8 @@
 Cargo.lock
 *.spec.json
 /.idea
+
+# Local credentials for the authenticated examples and tests (see .env.example)
+.env
+.env.*
+!.env.example
