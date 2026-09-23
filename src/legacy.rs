@@ -3,7 +3,7 @@
 //!
 //! Legacy IDs are still accepted by [`crate::prelude::Esi::get_endpoint_for_op_id`],
 //! which logs a deprecation warning naming the OpenAPI ID. They will be
-//! removed in 0.2.0.
+//! removed before 1.0.0.
 
 /// Pairs of `(legacy_swagger_id, openapi_id)`, sorted by legacy ID.
 pub(crate) const LEGACY_OP_IDS: &[(&str, &str)] = &[

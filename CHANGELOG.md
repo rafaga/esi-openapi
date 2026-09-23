@@ -57,7 +57,7 @@ fork of [rfesi](https://github.com/Celeo/rfesi) 0.50.2; versioning restarts at 0
 ### Deprecated
 
 - rfesi's snake_case operation IDs are still accepted by `Esi::get_endpoint_for_op_id`,
-  with a warning naming the OpenAPI ID. They will be removed in 0.2.0.
+  with a warning naming the OpenAPI ID. They will be removed before 1.0.0.
 
 | rfesi (Swagger) ID | esi-openapi (OpenAPI) ID |
 | --- | --- |
