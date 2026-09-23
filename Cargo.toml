@@ -5,7 +5,6 @@ authors = ["Rafael <rafaga@users.noreply.github.com>", "Celeo <mattboulanger@fas
 edition = "2021"
 description = "Rust API for EVE Online's ESI, based on the OpenAPI specification (fork of rfesi)"
 readme = "README.md"
-homepage = "https://github.com/rafaga/esi-openapi"
 repository = "https://github.com/rafaga/esi-openapi"
 documentation = "https://docs.rs/esi-openapi"
 license = "MIT OR Apache-2.0"
