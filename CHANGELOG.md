@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. This project is a
 fork of [rfesi](https://github.com/Celeo/rfesi) 0.50.2; versioning restarts at 0.1.0.
 
-## [0.1.0] - 09-22-2026
+## [0.1.0] - 2026-09-22
 
 ### Changed
 
