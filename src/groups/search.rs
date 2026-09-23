@@ -11,7 +11,7 @@ impl SearchGroup<'_> {
     api_get!(
         /// Search for entities that match a given sub-string.
         search,
-        "get_characters_character_id_search",
+        "GetCharactersCharacterIdSearch",
         RequestType::Authenticated,
         SearchResult,
         (character_id: i32) => "{character_id}";

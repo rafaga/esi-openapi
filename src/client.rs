@@ -3,6 +3,7 @@
 use crate::{
     client::ErrorLimitStatus::{Limited, NotLimited},
     groups::*,
+    legacy,
     pkce::{self, PkceVerifier},
     prelude::*,
     spec::Spec,
@@ -10,7 +11,7 @@ use crate::{
 use base64::engine::{general_purpose::STANDARD as base64, Engine};
 use log::{debug, error, warn};
 #[cfg(feature = "random_state")]
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, RngExt};
 use reqwest::{
     header::{self, HeaderMap, HeaderValue},
     Client, Method,
@@ -27,14 +28,20 @@ use tokio::sync::RwLock;
 const BASE_URL: &str = "https://esi.evetech.net/";
 const AUTHORIZE_URL: &str = "https://login.eveonline.com/v2/oauth/authorize";
 const TOKEN_URL: &str = "https://login.eveonline.com/v2/oauth/token";
-const SPEC_URL: &str = "https://esi.evetech.net/latest/swagger.json";
+const SPEC_URL: &str = "https://esi.evetech.net/meta/openapi.json";
 const ERROR_LIMIT_REMAIN_HEADER: &str = "x-esi-error-limit-remain";
 const ERROR_LIMIT_RESET_HEADER: &str = "x-esi-error-limit-reset";
+const RATE_LIMIT_GROUP_HEADER: &str = "x-ratelimit-group";
+const RATE_LIMIT_LIMIT_HEADER: &str = "x-ratelimit-limit";
+const RATE_LIMIT_REMAINING_HEADER: &str = "x-ratelimit-remaining";
+const RATE_LIMIT_USED_HEADER: &str = "x-ratelimit-used";
 
 static COMPATIBILITY_HEADER: &str = "X-Compatibility-Date";
-/// The deafult compatibility date to use if none is specified
-/// in the builder.
-const COMPATIBILITY_DATE_DEFAULT: &str = "2025-08-26";
+/// The default compatibility date to use if none is specified
+/// in the builder: the latest date listed by
+/// `https://esi.evetech.net/meta/compatibility-dates` when this
+/// version was released.
+pub const COMPATIBILITY_DATE_DEFAULT: &str = "2026-08-18";
 
 /// Response from SSO when exchanging a SSO code for tokens.
 #[derive(Debug, Deserialize)]
@@ -58,10 +65,67 @@ struct ErrorLimitState {
     expires_at_millis: i64,
 }
 
+/// Whether ESI's legacy error limit (`X-Esi-Error-Limit-*` headers) is
+/// currently blocking requests from this client.
 #[derive(Copy, Clone, Debug)]
 pub enum ErrorLimitStatus {
-    Limited { for_millis: i64 },
+    /// Too many errors: requests are refused until the window resets.
+    Limited {
+        /// Milliseconds until the error-limit window resets.
+        for_millis: i64,
+    },
+    /// Requests may be made.
     NotLimited,
+}
+
+/// Latest rate-limit state ESI reported for one route group.
+///
+/// ESI uses a floating-window token bucket per application/character
+/// pair and route group; see the [ESI rate limiting docs]. The values
+/// are those of the most recent response for the group.
+///
+/// [ESI rate limiting docs]: https://developers.eveonline.com/docs/services/esi/rate-limiting/
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RateLimitStatus {
+    /// Route group, from `X-Ratelimit-Group`.
+    pub group: String,
+    /// Raw `X-Ratelimit-Limit` value, e.g. `150/15m`.
+    pub limit: String,
+    /// Tokens per window, parsed from `limit` (e.g. `150`).
+    pub max_tokens: Option<u64>,
+    /// Window length in seconds, parsed from `limit` (e.g. `900` for `15m`).
+    pub window_secs: Option<u64>,
+    /// Tokens left in the window, from `X-Ratelimit-Remaining`.
+    pub remaining: i64,
+    /// Tokens consumed by the request that returned these headers,
+    /// from `X-Ratelimit-Used`.
+    pub used: i64,
+    /// Millisecond unix timestamp of the response these values came from.
+    pub updated_at_millis: i64,
+}
+
+/// Parse an `X-Ratelimit-Limit` value such as `150/15m` into
+/// `(tokens, window_secs)`.
+fn parse_rate_limit(value: &str) -> (Option<u64>, Option<u64>) {
+    let Some((tokens, window)) = value.trim().split_once('/') else {
+        return (value.trim().parse().ok(), None);
+    };
+    let tokens = tokens.trim().parse().ok();
+    let window = window.trim();
+    let split = window
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(window.len());
+    let (amount, unit) = window.split_at(split);
+    let amount: Option<u64> = amount.parse().ok();
+    let multiplier = match unit {
+        "" | "s" => Some(1),
+        "m" => Some(60),
+        "h" => Some(3600),
+        "d" => Some(86_400),
+        _ => None,
+    };
+    let window_secs = amount.zip(multiplier).map(|(a, m)| a * m);
+    (tokens, window_secs)
 }
 
 /// Which base URL to start with - the public URL for unauthenticated
@@ -80,7 +144,7 @@ pub struct AuthenticationInformation {
     /// URL to call/pass to users to initiate an authentication and get an auth code from ESI.
     pub authorization_url: String,
     /// If the default feature "random_state" is enabled, the returned state field string will be
-    /// random; otherwise it'll be "rfesi_unused". The ESI docs link to
+    /// random; otherwise it'll be "esi_openapi_unused". The ESI docs link to
     /// [this auth0 page](https://auth0.com/docs/secure/attack-protection/state-parameters)
     /// to explain. You need to check the state yourself when the response from ESI is received.
     pub state: String,
@@ -95,7 +159,7 @@ pub struct AuthenticationInformation {
 ///
 /// # Example
 /// ```rust,no_run
-/// use rfesi::prelude::EsiBuilder;
+/// use esi_openapi::prelude::EsiBuilder;
 /// // the struct must be mutable for some functionality
 /// let mut esi = EsiBuilder::new()
 ///     .user_agent("some user agent")
@@ -126,7 +190,10 @@ pub struct Esi {
     /// HTTP client
     pub(crate) client: Client,
     pub(crate) spec: Option<Spec>,
+    /// `operationId` -> URL path, built from `spec`.
+    op_index: HashMap<String, String>,
     error_limit_state: Arc<RwLock<Option<ErrorLimitState>>>,
+    rate_limits: Arc<RwLock<HashMap<String, RateLimitStatus>>>,
 }
 
 impl Esi {
@@ -136,6 +203,11 @@ impl Esi {
         let compatibility_date = builder
             .compatibility_date
             .unwrap_or_else(|| COMPATIBILITY_DATE_DEFAULT.to_owned());
+        let op_index = builder
+            .spec
+            .as_ref()
+            .map(Spec::operation_index)
+            .unwrap_or_default();
         let e = Esi {
             compatibility_date: compatibility_date.clone(),
             client_id: builder.client_id,
@@ -152,12 +224,18 @@ impl Esi {
             refresh_token: builder.refresh_token,
             client,
             spec: builder.spec,
+            op_index,
             error_limit_state: Arc::new(RwLock::new(None)),
+            rate_limits: Arc::new(RwLock::new(HashMap::new())),
         };
         Ok(e)
     }
 
-    /// Get the Swagger spec from ESI and store it in this struct.
+    /// Get the OpenAPI spec from ESI and store it in this struct.
+    ///
+    /// The spec is requested with this struct's compatibility date
+    /// (`X-Compatibility-Date`), so the paths match the API version
+    /// that later requests will use.
     ///
     /// If you are making use of the `try_get_endpoint_for_op_id`,
     /// then this function will be called there when needed
@@ -169,7 +247,7 @@ impl Esi {
     /// # Example
     /// ```rust,no_run
     /// # async fn run() {
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .client_id("your_client_id")
@@ -185,13 +263,22 @@ impl Esi {
             self.compatibility_date
         );
         self.assert_not_error_limited().await?;
-        let resp = self.client.get(&self.spec_url).send().await?;
-        self.process_error_limit_headers(resp.headers()).await?;
+        let resp = self
+            .client
+            .get(&self.spec_url)
+            .header(
+                COMPATIBILITY_HEADER,
+                HeaderValue::from_str(&self.compatibility_date)?,
+            )
+            .send()
+            .await?;
+        self.process_response_headers(resp.headers()).await?;
         if !resp.status().is_success() {
             error!("Got status {} when requesting spec", resp.status());
-            return Err(EsiError::InvalidStatusCode(resp.status().as_u16()));
+            return Err(Self::status_error(resp.status().as_u16(), resp.headers()));
         }
-        let data = resp.json().await?;
+        let data: Spec = resp.json().await?;
+        self.op_index = data.operation_index();
         self.spec = Some(data);
         Ok(())
     }
@@ -222,11 +309,11 @@ impl Esi {
     /// infos for future authentication request.
     ///
     /// You can inspect the URL returned by ESI to your web service to ensure it matches.
-    /// No checking is done by `rfesi`.
+    /// No checking is done by `esi-openapi`.
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .client_id("your_client_id")
@@ -247,13 +334,13 @@ impl Esi {
     pub fn get_authorize_url(&self) -> EsiResult<AuthenticationInformation> {
         self.check_client_info()?;
         #[cfg(feature = "random_state")]
-        let state = rand::thread_rng()
+        let state = rand::rng()
             .sample_iter(&Alphanumeric)
             .take(10)
             .map(char::from)
             .collect();
         #[cfg(not(feature = "random_state"))]
-        let state = "rfesi_unused".to_string();
+        let state = "esi_openapi_unused".to_string();
         let mut url = format!(
             "{}?response_type=code&redirect_uri={}&client_id={}&scope={}&state={state}",
             self.authorize_url,
@@ -310,7 +397,7 @@ impl Esi {
     /// # Example (client secret)
     /// ```rust,no_run
     /// # async fn run() {
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .client_id("your_client_id")
@@ -324,7 +411,7 @@ impl Esi {
     ///
     /// # Example (PKCE/Application authentication)
     /// ```rust,no_run
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     ///  async fn run() {
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
@@ -396,7 +483,7 @@ impl Esi {
     /// # Example
     /// ```rust,no_run
     /// # async fn run() {
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .client_id("your_client_id")
@@ -423,7 +510,7 @@ impl Esi {
     /// # Example with internal token
     /// ```rust,no_run
     /// # async fn run() {
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .refresh_token(Some("MyRefreshToken"))
@@ -435,7 +522,7 @@ impl Esi {
     /// # Example with input token
     /// ```rust,no_run
     /// # async fn run() {
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .build()
@@ -499,7 +586,7 @@ impl Esi {
     /// ```rust,no_run
     /// # async fn run() {
     /// # use serde::Deserialize;
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .client_id("your_client_id")
@@ -561,16 +648,21 @@ impl Esi {
         };
         let req = req_builder.build()?;
         let resp = self.client.execute(req).await?;
-        self.process_error_limit_headers(resp.headers()).await?;
+        self.process_response_headers(resp.headers()).await?;
         if !resp.status().is_success() {
-            return Err(EsiError::InvalidStatusCode(resp.status().as_u16()));
+            return Err(Self::status_error(resp.status().as_u16(), resp.headers()));
         }
         let text = resp.text().await?;
         let data: T = serde_json::from_str(&text)?;
         Ok(data)
     }
 
-    /// Resolve an `operationId` to a URL path utilizing the Swagger spec.
+    /// Resolve an `operationId` to a URL path utilizing the OpenAPI spec.
+    ///
+    /// Operation IDs are those of the ESI OpenAPI spec, e.g.
+    /// `GetMarketsRegionIdOrders`. rfesi's legacy snake_case IDs
+    /// (e.g. `get_markets_region_id_orders`) are still accepted with a
+    /// deprecation warning until 0.2.0.
     ///
     /// If the spec has not yet been retrieved when calling this function,
     /// an API call will be made to ESI to fetch that data (thus the
@@ -585,7 +677,7 @@ impl Esi {
     /// # Example
     /// ```rust,no_run
     /// # async fn run() {
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .client_id("your_client_id")
@@ -594,7 +686,7 @@ impl Esi {
     /// #     .build()
     /// #     .unwrap();
     /// let endpoint = esi
-    ///     .try_get_endpoint_for_op_id("get_alliances_alliance_id_contacts_labels")
+    ///     .try_get_endpoint_for_op_id("GetAlliancesAllianceIdContactsLabels")
     ///     .await
     ///     .unwrap();
     /// # }
@@ -607,7 +699,12 @@ impl Esi {
         self.get_endpoint_for_op_id(op_id)
     }
 
-    /// Resolve an `operationId` to a URL path utilizing the Swagger spec.
+    /// Resolve an `operationId` to a URL path utilizing the OpenAPI spec.
+    ///
+    /// Operation IDs are those of the ESI OpenAPI spec, e.g.
+    /// `GetMarketsRegionIdOrders`. rfesi's legacy snake_case IDs
+    /// (e.g. `get_markets_region_id_orders`) are still accepted with a
+    /// deprecation warning until 0.2.0.
     ///
     /// If the spec has not yet been retrieved when calling this function,
     /// this function will return an error.
@@ -618,7 +715,7 @@ impl Esi {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use rfesi::prelude::*;
+    /// # use esi_openapi::prelude::*;
     /// # let mut esi = EsiBuilder::new()
     /// #     .user_agent("some user agent")
     /// #     .client_id("your_client_id")
@@ -626,25 +723,97 @@ impl Esi {
     /// #     .callback_url("your_callback_url")
     /// #     .build()
     /// #     .unwrap();
-    /// let endpoint = esi.get_endpoint_for_op_id("get_alliances_alliance_id_contacts_labels").unwrap();
+    /// let endpoint = esi.get_endpoint_for_op_id("GetAlliancesAllianceIdContactsLabels").unwrap();
     /// ```
     pub fn get_endpoint_for_op_id(&self, op_id: &str) -> EsiResult<String> {
         if self.spec.is_none() {
             return Err(EsiError::EmptySpec);
         }
-        let data = self
-            .spec
-            .as_ref()
-            .ok_or_else(|| EsiError::FailedSpecParse("Unwrapping JSON Value".to_owned()))?;
-        for (path_str, path_obj) in data.paths.iter() {
-            for method in path_obj.values() {
-                if method.operation_id == op_id {
-                    // the paths contain a leading slash, so strip it
-                    return Ok(path_str.chars().skip(1).collect());
-                }
+        if let Some(path) = self.op_index.get(op_id) {
+            return Ok(path.clone());
+        }
+        if let Some(new_id) = legacy::openapi_id_for(op_id) {
+            warn!(
+                "operationId '{op_id}' is a deprecated Swagger ID; use '{new_id}' instead (legacy IDs will be removed in 0.2.0)"
+            );
+            if let Some(path) = self.op_index.get(new_id) {
+                return Ok(path.clone());
             }
         }
         Err(EsiError::UnknownOperationID(op_id.to_owned()))
+    }
+
+    /// Build the error for a non-success response status.
+    fn status_error(status: u16, headers: &HeaderMap) -> EsiError {
+        if status == 429 {
+            let header_str = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+            let group = header_str(RATE_LIMIT_GROUP_HEADER).map(str::to_owned);
+            let retry_after_secs =
+                header_str(header::RETRY_AFTER.as_str()).and_then(|v| v.trim().parse::<u64>().ok());
+            warn!("Rate limited by ESI (group {group:?}); retry after {retry_after_secs:?}s");
+            return EsiError::RateLimited {
+                group,
+                retry_after_secs,
+            };
+        }
+        EsiError::InvalidStatusCode(status)
+    }
+
+    /// Record the error-limit and rate-limit headers of a response.
+    async fn process_response_headers(&self, headers: &HeaderMap) -> Result<(), EsiError> {
+        self.process_error_limit_headers(headers).await?;
+        self.process_rate_limit_headers(headers).await
+    }
+
+    async fn process_rate_limit_headers(&self, headers: &HeaderMap) -> Result<(), EsiError> {
+        let Some(group) = headers.get(RATE_LIMIT_GROUP_HEADER) else {
+            return Ok(());
+        };
+        let group = group.to_str()?.to_owned();
+        let limit = match headers.get(RATE_LIMIT_LIMIT_HEADER) {
+            Some(v) => v.to_str()?.to_owned(),
+            None => String::new(),
+        };
+        let parse_i64 = |name: &str| -> Result<i64, EsiError> {
+            match headers.get(name) {
+                Some(v) => v
+                    .to_str()?
+                    .trim()
+                    .parse::<i64>()
+                    .map_err(|e| EsiError::HeaderParseError(name.into(), e)),
+                None => Ok(0),
+            }
+        };
+        let remaining = parse_i64(RATE_LIMIT_REMAINING_HEADER)?;
+        let used = parse_i64(RATE_LIMIT_USED_HEADER)?;
+        let (max_tokens, window_secs) = parse_rate_limit(&limit);
+        let status = RateLimitStatus {
+            group: group.clone(),
+            limit,
+            max_tokens,
+            window_secs,
+            remaining,
+            used,
+            updated_at_millis: current_time_millis()?,
+        };
+        debug!("Rate limit status: {status:?}");
+        self.rate_limits.write().await.insert(group, status);
+        Ok(())
+    }
+
+    /// Latest rate-limit status ESI reported for a route group
+    /// (the `X-Ratelimit-Group` header value, e.g. `market`).
+    ///
+    /// Returns `None` if no response from that group has been seen yet.
+    /// Routes not yet moved to ESI's rate limiter do not send these
+    /// headers; they are covered by [`Esi::is_error_limited`] instead.
+    pub async fn rate_limit_status(&self, group: &str) -> Option<RateLimitStatus> {
+        self.rate_limits.read().await.get(group).cloned()
+    }
+
+    /// Latest rate-limit status for every route group seen so far.
+    pub async fn rate_limit_statuses(&self) -> HashMap<String, RateLimitStatus> {
+        self.rate_limits.read().await.clone()
     }
 
     async fn process_error_limit_headers(&self, headers: &HeaderMap) -> Result<(), EsiError> {
@@ -884,11 +1053,143 @@ fn current_time_millis() -> Result<i64, EsiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthenticateResponse, ERROR_LIMIT_REMAIN_HEADER, ERROR_LIMIT_RESET_HEADER};
+    use super::{
+        parse_rate_limit, AuthenticateResponse, Esi, ERROR_LIMIT_REMAIN_HEADER,
+        ERROR_LIMIT_RESET_HEADER, RATE_LIMIT_GROUP_HEADER, RATE_LIMIT_LIMIT_HEADER,
+        RATE_LIMIT_REMAINING_HEADER, RATE_LIMIT_USED_HEADER,
+    };
     use crate::errors::EsiError;
     use crate::prelude::EsiBuilder;
+    use crate::spec::Spec;
     use http::{HeaderMap, HeaderValue};
     use std::time::Duration;
+
+    const FIXTURE: &str = include_str!("../resources/test/openapi.json");
+
+    fn esi_with_fixture() -> Esi {
+        let spec: Spec = serde_json::from_str(FIXTURE).unwrap();
+        EsiBuilder::new()
+            .user_agent("Client test, not meant to request")
+            .spec(Some(spec))
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_resolve_openapi_op_id() {
+        let esi = esi_with_fixture();
+        assert_eq!(
+            esi.get_endpoint_for_op_id("GetMarketsRegionIdOrders")
+                .unwrap(),
+            "markets/{region_id}/orders"
+        );
+        assert_eq!(
+            esi.get_endpoint_for_op_id("PostUniverseIds").unwrap(),
+            "universe/ids"
+        );
+    }
+
+    #[test]
+    fn test_resolve_legacy_op_id() {
+        let esi = esi_with_fixture();
+        assert_eq!(
+            esi.get_endpoint_for_op_id("get_markets_region_id_orders")
+                .unwrap(),
+            "markets/{region_id}/orders"
+        );
+        assert_eq!(
+            esi.get_endpoint_for_op_id("get_characters_character_id")
+                .unwrap(),
+            "characters/{character_id}"
+        );
+    }
+
+    #[test]
+    fn test_all_legacy_ids_resolve() {
+        let esi = esi_with_fixture();
+        for (legacy, openapi) in crate::legacy::LEGACY_OP_IDS {
+            esi.get_endpoint_for_op_id(openapi)
+                .unwrap_or_else(|_| panic!("{openapi} (from {legacy}) missing from spec"));
+        }
+    }
+
+    #[test]
+    fn test_resolve_unknown_op_id() {
+        let esi = esi_with_fixture();
+        match esi.get_endpoint_for_op_id("GetNothingHere") {
+            Err(EsiError::UnknownOperationID(id)) => assert_eq!(id, "GetNothingHere"),
+            other => panic!("Unexpected result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_without_spec() {
+        let esi = EsiBuilder::new().user_agent("test").build().unwrap();
+        assert!(matches!(
+            esi.get_endpoint_for_op_id("GetMarketsPrices"),
+            Err(EsiError::EmptySpec)
+        ));
+    }
+
+    #[test]
+    fn test_parse_rate_limit() {
+        assert_eq!(parse_rate_limit("150/15m"), (Some(150), Some(900)));
+        assert_eq!(parse_rate_limit("20/1h"), (Some(20), Some(3600)));
+        assert_eq!(parse_rate_limit("300/30s"), (Some(300), Some(30)));
+        assert_eq!(parse_rate_limit("10/5x"), (Some(10), None));
+        assert_eq!(parse_rate_limit("garbage"), (None, None));
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_headers() {
+        let esi = EsiBuilder::new().user_agent("test").build().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.append(RATE_LIMIT_GROUP_HEADER, HeaderValue::from_static("market"));
+        headers.append(RATE_LIMIT_LIMIT_HEADER, HeaderValue::from_static("150/15m"));
+        headers.append(RATE_LIMIT_REMAINING_HEADER, HeaderValue::from_static("148"));
+        headers.append(RATE_LIMIT_USED_HEADER, HeaderValue::from_static("2"));
+        esi.process_response_headers(&headers)
+            .await
+            .expect("Should parse");
+        let status = esi.rate_limit_status("market").await.expect("recorded");
+        assert_eq!(status.limit, "150/15m");
+        assert_eq!(status.max_tokens, Some(150));
+        assert_eq!(status.window_secs, Some(900));
+        assert_eq!(status.remaining, 148);
+        assert_eq!(status.used, 2);
+        assert!(esi.rate_limit_status("other").await.is_none());
+        assert_eq!(esi.rate_limit_statuses().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_no_rate_limit_headers() {
+        let esi = EsiBuilder::new().user_agent("test").build().unwrap();
+        esi.process_response_headers(&HeaderMap::new())
+            .await
+            .expect("Should parse");
+        assert!(esi.rate_limit_statuses().await.is_empty());
+    }
+
+    #[test]
+    fn test_status_error_429() {
+        let mut headers = HeaderMap::new();
+        headers.append(RATE_LIMIT_GROUP_HEADER, HeaderValue::from_static("market"));
+        headers.append(http::header::RETRY_AFTER, HeaderValue::from_static("12"));
+        match Esi::status_error(429, &headers) {
+            EsiError::RateLimited {
+                group,
+                retry_after_secs,
+            } => {
+                assert_eq!(group.as_deref(), Some("market"));
+                assert_eq!(retry_after_secs, Some(12));
+            }
+            other => panic!("Unexpected error: {other}"),
+        }
+        assert!(matches!(
+            Esi::status_error(404, &headers),
+            EsiError::InvalidStatusCode(404)
+        ));
+    }
 
     #[test]
     fn test_authenticateresponse_deserialize() {

@@ -27,14 +27,15 @@ pub struct JumpClone {
 pub struct Clones {
     pub home_location: Option<CloneHome>,
     pub jump_clones: Vec<JumpClone>,
-    pub last_clone_jump_date: String,
+    pub last_clone_jump_date: Option<String>,
+    pub last_station_change_date: Option<String>,
 }
 
 impl ClonesGroup<'_> {
     api_get!(
         /// Get a character's clones.
         get_clones,
-        "get_characters_character_id_clones",
+        "GetCharactersCharacterIdClones",
         RequestType::Authenticated,
         Clones,
         (character_id: i32) => "{character_id}"
@@ -43,7 +44,7 @@ impl ClonesGroup<'_> {
     api_get!(
         /// Get a character's (active clone's) implants.
         get_clone_implants,
-        "get_characters_character_id_implants",
+        "GetCharactersCharacterIdImplants",
         RequestType::Authenticated,
         Vec<u32>,
         (character_id: i32) => "{character_id}"

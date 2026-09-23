@@ -133,7 +133,7 @@ pub struct Station {
 pub struct Structure {
     pub name: String,
     pub owner_id: i32,
-    pub position: Position,
+    pub position: Option<Position>,
     pub solar_system_id: i32,
     pub type_id: Option<i32>,
 }
@@ -161,7 +161,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get information on a category
         get_universe_categories_category,
-        "get_universe_categories_category_id",
+        "GetUniverseCategoriesCategoryId",
         RequestType::Public,
         CategoriesCategory,
         (category_id: i32) => "{category_id}"
@@ -170,7 +170,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get information on a group
         get_universe_groups_group,
-        "get_universe_groups_group_id",
+        "GetUniverseGroupsGroupId",
         RequestType::Public,
         Group,
         (group_id: i32) => "{group_id}"
@@ -179,7 +179,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get information on a type
         get_universe_types_type,
-        "get_universe_types_type_id",
+        "GetUniverseTypesTypeId",
         RequestType::Public,
         Type,
         (type_id: i32) => "{type_id}"
@@ -188,7 +188,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get a list of constellation ids
         get_constellation_ids,
-        "get_universe_constellations",
+        "GetUniverseConstellations",
         RequestType::Public,
         Vec<i32>,
     );
@@ -196,7 +196,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get information on a constellation
         get_constellation,
-        "get_universe_constellations_constellation_id",
+        "GetUniverseConstellationsConstellationId",
         RequestType::Public,
         Constellation,
         (constellation_id: i32) => "{constellation_id}"
@@ -205,7 +205,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get a list of region ids
         get_region_ids,
-        "get_universe_regions",
+        "GetUniverseRegions",
         RequestType::Public,
         Vec<i32>,
     );
@@ -213,7 +213,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get information on a region
         get_region,
-        "get_universe_regions_region_id",
+        "GetUniverseRegionsRegionId",
         RequestType::Public,
         Region,
         (region_id: i32) => "{region_id}"
@@ -222,7 +222,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get a list of system ids
         get_system_ids,
-        "get_universe_systems",
+        "GetUniverseSystems",
         RequestType::Public,
         Vec<i32>,
     );
@@ -230,7 +230,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get information on a system
         get_system,
-        "get_universe_systems_system_id",
+        "GetUniverseSystemsSystemId",
         RequestType::Public,
         System,
         (system_id: i32) => "{system_id}"
@@ -239,7 +239,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get a list of type ids
         get_type_ids,
-        "get_universe_types",
+        "GetUniverseTypes",
         RequestType::Public,
         Vec<i32>,
     );
@@ -247,7 +247,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Get information on a type
         get_type,
-        "get_universe_types_type_id",
+        "GetUniverseTypesTypeId",
         RequestType::Public,
         Type,
         (type_id: i32) => "{type_id}"
@@ -256,7 +256,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Information about a station
         get_station,
-        "get_universe_stations_station_id",
+        "GetUniverseStationsStationId",
         RequestType::Public,
         Station,
         (station_id: i32) => "{station_id}"
@@ -265,7 +265,7 @@ impl UniverseGroup<'_> {
     api_get!(
         /// Returns information on requested structure if you are on the ACL. Otherwise, returns “Forbidden” for all inputs.
         get_structure,
-        "get_universe_structures_structure_id",
+        "GetUniverseStructuresStructureId",
         RequestType::Authenticated,
         Structure,
         (structure_id: i64) => "{structure_id}"
@@ -274,7 +274,7 @@ impl UniverseGroup<'_> {
     api_post!(
         /// Get IDs from a list of names
         get_ids,
-        "post_universe_ids",
+        "PostUniverseIds",
         RequestType::Public,
         Ids,
         ,

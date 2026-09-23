@@ -1,4 +1,4 @@
-//! rfesi - "Rust for ESI"
+//! esi-openapi - Rust for ESI, based on the OpenAPI spec (fork of rfesi)
 //!
 //! [ESI] bindings in Rust for [EVE Online].
 //!
@@ -11,7 +11,7 @@
 //! # Example of the authorization flow (https://docs.esi.evetech.net/docs/sso/web_based_sso_flow.html)
 //!
 //! ```rust,no_run
-//! use rfesi::prelude::*;
+//! use esi_openapi::prelude::*;
 //!
 //! fn create_esi() -> EsiResult<Esi> {
 //!     // Create a new struct from the builder. These parameters
@@ -51,7 +51,7 @@
 //! # Example of the authorization flow (Using PKCE/Application flow - See https://docs.esi.evetech.net/docs/sso/native_sso_flow.html)
 //!
 //! ```rust,no_run
-//! use rfesi::prelude::*;
+//! use esi_openapi::prelude::*;
 //!
 //! fn create_esi() -> EsiResult<Esi> {
 //!     // Create a new struct from the builder. These parameters
@@ -98,11 +98,6 @@
 #![deny(clippy::all)]
 #![deny(missing_docs)]
 
-#[cfg(all(feature = "default-tls", feature = "rustls-tls"))]
-compile_error!(
-    "feature \"default-tls\" and feature \"rustls-tls\" cannot be enabled at the same time"
-);
-
 #[macro_use]
 mod macros;
 
@@ -112,6 +107,7 @@ mod errors;
 pub mod groups;
 #[cfg(feature = "validate_jwt")]
 mod jwt_util;
+mod legacy;
 mod pkce;
 pub mod prelude;
-mod spec;
+pub mod spec;
