@@ -609,33 +609,8 @@ impl Esi {
     ) -> EsiResult<T> {
         debug!("Making {request_type:?} {method} request to {endpoint} with query: {query:?}");
         self.assert_not_error_limited().await?;
-        if request_type == RequestType::Authenticated {
-            if self.access_token.is_none() {
-                return Err(EsiError::MissingAuthentication);
-            }
-            if self.access_expiration.unwrap() < current_time_millis()? {
-                return Err(EsiError::AccessTokenExpired);
-            }
-        }
-        let headers = {
-            let mut map = HeaderMap::new();
-            // The 'user-agent' and 'content-type' headers are set in the default headers
-            // from the builder, so all that's required here is to set the authorization
-            // header, if present, and the compatibility date.
-            if request_type == RequestType::Authenticated {
-                if let Some(at) = &self.access_token {
-                    map.insert(
-                        header::AUTHORIZATION,
-                        HeaderValue::from_str(&format!("Bearer {at}"))?,
-                    );
-                }
-            }
-            map.insert(
-                COMPATIBILITY_HEADER,
-                HeaderValue::from_str(&self.compatibility_date)?,
-            );
-            map
-        };
+        self.check_authentication(&request_type)?;
+        let headers = self.request_headers(&request_type)?;
         let url = format!("{}{endpoint}", self.base_api_url);
         let mut req_builder = self
             .client
@@ -655,6 +630,43 @@ impl Esi {
         let text = resp.text().await?;
         let data: T = serde_json::from_str(&text)?;
         Ok(data)
+    }
+
+    /// For an authenticated request, fails unless there is a valid, unexpired
+    /// access token.
+    fn check_authentication(&self, request_type: &RequestType) -> EsiResult<()> {
+        if *request_type != RequestType::Authenticated {
+            return Ok(());
+        }
+        if self.access_token.is_none() {
+            return Err(EsiError::MissingAuthentication);
+        }
+        if self.access_expiration.unwrap() < current_time_millis()? {
+            return Err(EsiError::AccessTokenExpired);
+        }
+        Ok(())
+    }
+
+    /// The per-request headers: the authorization header, if authenticated,
+    /// and the compatibility date.
+    fn request_headers(&self, request_type: &RequestType) -> EsiResult<HeaderMap> {
+        let mut map = HeaderMap::new();
+        // The 'user-agent' and 'content-type' headers are set in the default headers
+        // from the builder, so all that's required here is to set the authorization
+        // header, if present, and the compatibility date.
+        if *request_type == RequestType::Authenticated {
+            if let Some(at) = &self.access_token {
+                map.insert(
+                    header::AUTHORIZATION,
+                    HeaderValue::from_str(&format!("Bearer {at}"))?,
+                );
+            }
+        }
+        map.insert(
+            COMPATIBILITY_HEADER,
+            HeaderValue::from_str(&self.compatibility_date)?,
+        );
+        Ok(map)
     }
 
     /// Resolve an `operationId` to a URL path utilizing the OpenAPI spec.
