@@ -35,7 +35,20 @@ This crate has several features that are enabled by default.
 
 [Docs link](https://docs.rs/esi-openapi).
 
-Not every ESI endpoint is mapped to a function yet. Missing endpoints can be called with `Esi::get_endpoint_for_op_id` and `Esi::query`, and PRs adding endpoints are welcome.
+### Coverage
+
+All 233 operations of the ESI OpenAPI spec (compatibility date `2026-08-18`) have a function in an endpoint group, reached through `Esi::group_*()`. `tests/conformance.rs` checks this against `resources/test/openapi.json` and also that each function uses the HTTP method, path placeholders, query keys and response fields of the spec. Anything newer can be called with `Esi::get_endpoint_for_op_id` and `Esi::query`, and PRs are welcome.
+
+Beyond the endpoints:
+
+- `Esi::fetch_all_pages` and `Esi::fetch_all_cursor` walk paginated listings; `Esi::query_with_pages` also returns `X-Pages`.
+- `EsiBuilder::enable_cache(true)` turns on a response cache that revalidates with `ETag` / `Last-Modified` and honors `x-client-cache-ttl`. `cache_max_entries` and `cache_max_bytes` bound its size.
+- `Esi::post_chunked` and the bulk lookups (`get_affiliation`, `get_names`, asset names and locations) split lists longer than the spec's maximum into several requests.
+- `EsiBuilder::rate_limit_policy(RateLimitPolicy::Wait { .. } | Fail)` throttles requests against the rate limits ESI reports instead of provoking `429`s (off by default).
+- `Esi::ensure_spec_fresh` reloads the spec only when it is stale.
+- `EsiBuilder::language` and `EsiBuilder::tenant` set `Accept-Language` and `X-Tenant`.
+- `Esi::required_scopes`, `Esi::missing_scopes`, `Esi::required_roles` and `Esi::declared_rate_limits` read the scopes, roles and rate limits that the spec declares for each operation.
+- `EsiError::Gone` reports resources ESI keeps as tombstones.
 
 ### Compatibility date
 

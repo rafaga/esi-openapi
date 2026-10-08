@@ -8,8 +8,8 @@ pub struct FactionWarfareGroup<'a> {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct FactionLeaderboardItem {
-    pub amount: Option<i32>,
-    pub faction_id: Option<i32>,
+    pub amount: Option<i64>,
+    pub faction_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,8 +30,8 @@ pub struct FWLeaderboards {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct CharacterLeaderboardItem {
-    pub amount: i32,
-    pub character_id: i32,
+    pub amount: i64,
+    pub character_id: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,8 +52,8 @@ pub struct FWCharacterLeaderboards {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct CorporationLeaderboardItem {
-    pub amount: i32,
-    pub corporation_id: i32,
+    pub amount: i64,
+    pub corporation_id: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,18 +74,18 @@ pub struct FWCorporationLeaderboards {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct FWStatsItemRange {
-    pub total: i32,
-    pub last_week: i32,
-    pub yesterday: i32,
+    pub total: i64,
+    pub last_week: i64,
+    pub yesterday: i64,
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct FWStatsItem {
-    pub faction_id: u32,
+    pub faction_id: i64,
     pub kills: FWStatsItemRange,
-    pub pilots: u32,
-    pub systems_controlled: u32,
+    pub pilots: i64,
+    pub systems_controlled: i64,
     pub victory_points: FWStatsItemRange,
 }
 
@@ -93,18 +93,18 @@ pub struct FWStatsItem {
 #[allow(missing_docs)]
 pub struct FWSystem {
     pub contested: String,
-    pub occupier_faction_id: u8,
-    pub owner_faction_id: u32,
-    pub solar_system_id: u32,
-    pub victory_points: u32,
-    pub victory_points_threshold: u32,
+    pub occupier_faction_id: i64,
+    pub owner_faction_id: i64,
+    pub solar_system_id: i64,
+    pub victory_points: i64,
+    pub victory_points_threshold: i64,
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct FWWar {
-    pub faction_id: i32,
-    pub against_id: i32,
+    pub faction_id: i64,
+    pub against_id: i64,
 }
 
 impl FactionWarfareGroup<'_> {
@@ -157,4 +157,63 @@ impl FactionWarfareGroup<'_> {
     );
 
     // more endpoints ...
+}
+
+/// Faction warfare statistics of a character.
+#[derive(Debug, Deserialize)]
+#[allow(missing_docs)]
+pub struct CharacterFwStats {
+    pub current_rank: Option<i64>,
+    pub enlisted_on: Option<String>,
+    pub faction_id: Option<i64>,
+    pub highest_rank: Option<i64>,
+    pub kills: FWStatsItemRange,
+    pub victory_points: FWStatsItemRange,
+}
+
+impl FactionWarfareGroup<'_> {
+    api_get!(
+        /// Get the faction warfare statistics of a character.
+        get_character_stats,
+        "GetCharactersCharacterIdFwStats",
+        RequestType::Authenticated,
+        CharacterFwStats,
+        (character_id: i64) => "{character_id}"
+    );
+}
+
+#[cfg(test)]
+mod character_basic_tests {
+    use super::CharacterFwStats;
+
+    #[test]
+    fn test_parse_stats_of_unenlisted_character() {
+        let json = r#"{"kills": {"last_week": 0, "total": 3, "yesterday": 0},
+            "victory_points": {"last_week": 0, "total": 10, "yesterday": 0}}"#;
+        let stats: CharacterFwStats = serde_json::from_str(json).unwrap();
+        assert!(stats.faction_id.is_none());
+        assert_eq!(stats.kills.total, 3);
+    }
+}
+
+/// Faction warfare statistics of a corporation.
+#[derive(Debug, Deserialize)]
+#[allow(missing_docs)]
+pub struct CorporationFwStats {
+    pub enlisted_on: Option<String>,
+    pub faction_id: Option<i64>,
+    pub kills: FWStatsItemRange,
+    pub pilots: Option<i64>,
+    pub victory_points: FWStatsItemRange,
+}
+
+impl FactionWarfareGroup<'_> {
+    api_get!(
+        /// Get the faction warfare statistics of a corporation.
+        get_corporation_stats,
+        "GetCorporationsCorporationIdFwStats",
+        RequestType::Authenticated,
+        CorporationFwStats,
+        (corporation_id: i64) => "{corporation_id}"
+    );
 }

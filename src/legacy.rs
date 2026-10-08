@@ -200,6 +200,24 @@ mod tests {
     }
 
     #[test]
+    fn test_legacy_targets_exist_in_the_spec() {
+        let spec: crate::spec::Spec =
+            serde_json::from_str(include_str!("../resources/test/openapi.json")).unwrap();
+        let index = spec.operation_index();
+        let missing: Vec<&str> = LEGACY_OP_IDS
+            .iter()
+            .map(|(_, id)| *id)
+            .filter(|id| !index.contains_key(*id))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "legacy aliases to unknown operations: {missing:?}"
+        );
+        // The table only covers operations rfesi had; the spec has many more.
+        assert!(LEGACY_OP_IDS.len() < index.len());
+    }
+
+    #[test]
     fn test_legacy_lookup() {
         assert_eq!(
             openapi_id_for("get_markets_region_id_orders"),

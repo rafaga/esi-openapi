@@ -14,7 +14,7 @@ impl SearchGroup<'_> {
         "GetCharactersCharacterIdSearch",
         RequestType::Authenticated,
         SearchResult,
-        (character_id: i32) => "{character_id}";
+        (character_id: i64) => "{character_id}";
         (categories: String) => "categories",
         (search: String) => "search";
         Optional(strict: bool) => "strict"
@@ -24,15 +24,15 @@ impl SearchGroup<'_> {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(missing_docs)]
 pub struct SearchResult {
-    pub agent: Option<Vec<i32>>,
-    pub alliance: Option<Vec<i32>>,
-    pub character: Option<Vec<i32>>,
-    pub constellation: Option<Vec<i32>>,
-    pub corporation: Option<Vec<i32>>,
-    pub faction: Option<Vec<i32>>,
-    pub inventory_type: Option<Vec<i32>>,
-    pub region: Option<Vec<i32>>,
-    pub solar_system: Option<Vec<i32>>,
-    pub station: Option<Vec<i32>>,
-    pub structure: Option<Vec<u64>>,
+    pub agent: Option<Vec<i64>>,
+    pub alliance: Option<Vec<i64>>,
+    pub character: Option<Vec<i64>>,
+    pub constellation: Option<Vec<i64>>,
+    pub corporation: Option<Vec<i64>>,
+    pub faction: Option<Vec<i64>>,
+    pub inventory_type: Option<Vec<i64>>,
+    pub region: Option<Vec<i64>>,
+    pub solar_system: Option<Vec<i64>>,
+    pub station: Option<Vec<i64>>,
+    pub structure: Option<Vec<i64>>,
 }

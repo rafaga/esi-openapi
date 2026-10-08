@@ -8,8 +8,8 @@ pub struct LocationGroup<'a> {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct LocationInfo {
-    pub solar_system_id: i32,
-    pub station_id: Option<i32>,
+    pub solar_system_id: i64,
+    pub station_id: Option<i64>,
     pub structure_id: Option<i64>,
 }
 
@@ -18,7 +18,7 @@ pub struct LocationInfo {
 pub struct OnlineStatus {
     pub last_login: Option<String>,
     pub last_logout: Option<String>,
-    pub logins: Option<i32>,
+    pub logins: Option<i64>,
     pub online: bool,
 }
 
@@ -27,7 +27,7 @@ pub struct OnlineStatus {
 pub struct CurrentShip {
     pub ship_item_id: i64,
     pub ship_name: String,
-    pub ship_type_id: i32,
+    pub ship_type_id: i64,
 }
 
 impl LocationGroup<'_> {
@@ -37,7 +37,7 @@ impl LocationGroup<'_> {
         "GetCharactersCharacterIdLocation",
         RequestType::Authenticated,
         LocationInfo,
-        (character_id: i32) => "{character_id}"
+        (character_id: i64) => "{character_id}"
     );
 
     api_get!(
@@ -46,7 +46,7 @@ impl LocationGroup<'_> {
         "GetCharactersCharacterIdOnline",
         RequestType::Authenticated,
         OnlineStatus,
-        (character_id: i32) => "{character_id}"
+        (character_id: i64) => "{character_id}"
     );
 
     api_get!(
@@ -55,6 +55,6 @@ impl LocationGroup<'_> {
         "GetCharactersCharacterIdShip",
         RequestType::Authenticated,
         CurrentShip,
-        (character_id: i32) => "{character_id}"
+        (character_id: i64) => "{character_id}"
     );
 }

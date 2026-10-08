@@ -3,6 +3,60 @@
 All notable changes to this project are documented here. This project is a
 fork of [rfesi](https://github.com/Celeo/rfesi) 0.50.2; versioning restarts at 0.1.0.
 
+## [Unreleased]
+
+## [0.2.0] - 2026-10-08
+
+### Added
+
+- New endpoint groups: `Esi::group_meta()` (`GetMetaChangelog`, `GetMetaCompatibilityDates`, `GetMetaName`, `GetMetaStatus`).
+- `StatusGroup::get_status`, `WarsGroup` (`list`, `get_war`, `get_war_killmails`), `SovereigntyGroup` (`get_campaigns`, `get_systems`) and `InsuranceGroup::get_prices`.
+- `DogmaGroup` (attributes, effects, dynamic items), `RoutesGroup::calculate_route` (`RouteRequest`, `RoutePreference`), `LoyaltyGroup::get_store_offers`, `ContractsGroup` public contracts (listing, items, bids), `IndustryGroup::get_facilities` and `MarketGroup` (`get_groups`, `get_group`, `get_region_types`).
+- New groups: `Esi::group_freelance_jobs()` (`list`, `get_job`) and `Esi::group_military_campaigns()` (`list`, `get_campaign`, `list_objectives`, `get_objective`), with a shared `Cursor` type for cursor pagination.
+- Fields that the spec defines as enums are Rust enums with an `Unrecognized` fallback variant (`HttpMethod`, `ChangeType`, `RouteHealth`, `CampaignEventType`, `ContractType`, `JobState`, `JobCareer`, `CampaignState`).
+- `UniverseGroup`: ancestries, bloodlines, races, factions, graphics, categories, group IDs, asteroid belts, moons, planets, stars, stargates, public structures, system jumps and kills, and name resolution (`get_names`), with `StructureFilter` and `NameCategory`.
+- New groups: `Esi::group_cosmetics()` (`get_skinr`) and `Esi::group_paragon_hub()` (`get_skinr_listings`); `PlanetaryInteractionGroup::get_schematic`.
+- Authenticated character endpoints: `SkillsGroup` (`get_attributes`, `get_skillqueue`), `CharacterGroup` (`get_agents_research`, `get_fatigue`, `get_medals`, `get_contact_notifications`, `get_roles`, `get_standings`, `get_titles`, `calculate_cspa_charge`), `WalletGroup::get_journal`, `LoyaltyGroup::get_character_points` and `FactionWarfareGroup::get_character_stats`. Their `character_id` is `i64`.
+- `MailGroup` (mail list and details, send, update, delete, labels create/delete, mailing lists) and `ContactsGroup` (character, corporation and alliance contacts and labels, add/edit/delete character contacts), with `RecipientType`, `MailLabelColor` and `ContactType` enums. `MailLabel::label_id` is now `i64`.
+- `api_get!`, `api_post!`, `api_put!` and `api_delete!` accept tagged query parameters (`Required`, `Optional`, `Many`, `OptionalMany`); list parameters are sent as repeated keys.
+- `CalendarGroup` (events, event details, respond, attendees) and `FittingsGroup` (list, create, delete), with `EventResponse`, `EventOwnerType`, `EventReply` and `FittingFlag` enums.
+- `FleetsGroup` (character fleet, settings, members, wings and squads: invite, kick, move, create, rename, delete), with a `FleetRole` enum. `api_post!` accepts `; NoBody` for POST requests without a body.
+- Character and corporation contracts (list, bids, items) with `ContractStatus` and `ContractAvailability` enums; `PlanetaryInteractionGroup` colonies (`get_character_planets`, `get_character_planet`) and `get_corporation_customs_offices`, with `PlanetType` and `StandingLevel` enums.
+- `CorporationGroup`: blueprints, container logs, divisions, facilities, icons, medals, issued medals, member limit, member titles, member tracking, roles, roles history, shareholders, standings, starbases, structures and titles, with enums for container actions, role types, starbase and structure states (all with an `Unrecognized` fallback). `CorporationRole`, `MedalStatus` and `StandingSource` now also implement `Serialize`.
+- **Breaking:** every integer the spec defines as `int64` is now `i64` in the group types and method parameters (previously `i32`, `u32`, `u64`, `u16` or `u8` in many places). `page` stays `i32`.
+- `Structures` group: character mercenary dens, corporation skyhooks and sovereignty hubs (listing and detail).
+- `CorporationProjects` group: project listing, detail, contribution and contributors, with cursor pagination (`Cursor`).
+- Industry mining (character, corporation extractions and observers) and corporation industry jobs; corporation killmails, orders (open and history), structure market orders and character order history; corporation wallets (balances, journal, transactions). New enums `OrderRange`, `ClosedOrderState`, `IndustryJobStatus` and `ObserverType`.
+- New groups `AccessListGroup` and `ActivitiesGroup`; character SKINR licenses and components, corporation faction warfare stats, character and corporation freelance jobs, character military campaign objectives, Paragon Hub SKINR listings (character, alliance, corporation) and the remaining User Interface calls (autopilot waypoint, contract, information and new mail windows). Enums `AccessLevel`, `TacticalOperationState`, `ParticipationState` and `SkinrComponentType`. All 233 operations of the spec are now covered.
+- `tests/conformance.rs` checks every spec operation is implemented and that the HTTP method, path placeholders, query keys and response struct fields match `resources/test/openapi.json`.
+- Pagination helpers: `Esi::query_with_pages` (also returns the `X-Pages` header), `Esi::fetch_all_pages` (walks the `page` parameter) and `Esi::fetch_all_cursor` (walks `cursor.after`). `RequestType` is now `Clone` and `Copy`.
+- Optional response cache (`EsiBuilder::enable_cache`, off by default): `GET` responses are revalidated with `ETag` / `Last-Modified`, a `304 Not Modified` reuses the stored body, and entries are served without a request while younger than the operation's `x-client-cache-ttl` (or the response `max-age`). `Spec::client_cache_ttl` and `Esi::cache_len` were added.
+- `Spec` now reads scopes, rate limits, required roles, pagination and tombstone TTLs per operation, and the OAuth2 scopes of the spec (`Spec::operation`, `Spec::required_scopes`, `Spec::oauth_scopes`, `Spec::scope_string_for`). `Esi::required_scopes`, `Esi::missing_scopes`, `Esi::required_roles` and `Esi::declared_rate_limits` expose them.
+- Weekly `spec-diff` workflow that reports drift between the live ESI spec and the test fixture.
+- `EsiBuilder::language` (`Language`, the `Accept-Language` header) and `EsiBuilder::tenant` (the `X-Tenant` header). `If-None-Match` and `If-Modified-Since` are sent by the response cache.
+- `EsiError::Gone`: returned for HTTP `404` / `410` on the five operations that declare `x-tombstone-ttl` (Paragon Hub SKINR listings), with the tombstone TTL. Which status ESI uses for a tombstone is not in the spec, so both are accepted.
+- Responses are requested compressed (`gzip`, `brotli`, `deflate` features of `reqwest`).
+- `Esi::fetch_all_cursor` asks for the largest page size the spec allows (`limit=100`) unless the query sets `limit`; `Esi::fetch_all_pages` requests the pages after the first concurrently (`EsiBuilder::page_concurrency`, 4 by default); the response cache holds at most 1024 responses (`EsiBuilder::cache_max_entries`). Only when it is full, it drops expired entries without an `ETag` / `Last-Modified` first, then expired entries that can be revalidated, then live ones, least recently used first within each group.
+- `CorporationRole` enum (with an `Unrecognized` fallback).
+- The live tests cover the new endpoints; the scopes they need were added to `ESI_SCOPES` in `.env.example`.
+- `uuid` is now a dependency (UUID identifiers of freelance jobs and military campaigns).
+- `api_put!` and `api_delete!` macros for building PUT and DELETE endpoint functions.
+- `EsiBuilder::cache_max_bytes` limits the size of the response cache in bytes, next to `cache_max_entries`; both use the same eviction order, and a response larger than the limit is not cached. `Esi::cache_bytes` reports the size.
+- `Esi::post_chunked` sends a `POST` with an array body in chunks (concurrently, in order). The list endpoints with a maximum body length split longer lists automatically: `CharacterGroup::get_affiliation`, `UniverseGroup::get_names` and the character and corporation asset names and locations (1000 items per request, checked against the spec by `tests/conformance.rs`). An empty list sends no request.
+- `EsiBuilder::rate_limit_policy` (`RateLimitPolicy`: `Off`, `Wait { max_wait }`, `Fail`; `Off` by default) throttles requests before ESI answers `429`. The client tracks the tokens of each route group and access token from the `X-Ratelimit-*` headers and its own spending, honors `Retry-After`, and either sleeps until the request fits or returns `EsiError::RateLimited` without calling ESI. Only operations that declare an `x-rate-limit` group in the spec are throttled.
+- `Esi::ensure_spec_fresh` downloads the spec only when it is missing, was requested with another compatibility date, or its `Cache-Control: max-age` has passed. `Esi::update_spec` still always asks, but sends `If-None-Match` / `If-Modified-Since` when the server gave the spec an `ETag` or `Last-Modified` (it does not today) and keeps the spec on a `304`.
+
+### Changed
+
+- Resolving a path to its `x-client-cache-ttl` / `x-tombstone-ttl` and an `operationId` to its metadata uses an index built once with the spec instead of scanning every path on each call (`Spec::get_operation_for_path` still scans and is meant for one-off use).
+- `Esi::fetch_all_cursor` reads each page in one pass, straight into the record type, instead of building a JSON tree first.
+- **Breaking:** the cursor page types (`ProjectsPage`, `ContributorsPage`, `FreelanceJobsPage`, `JobParticipantsPage`, `ObjectivesPage`, `CharacterObjectivesPage`, `SkinrListingsPage`, `CharacterSkinrListingsPage`) are replaced by one `Page<T>` with `cursor` and `items` (the records, whatever ESI names the array). `KillmailPosition` and `AssetLocationPosition` are now `Position` (which is also `Copy` and `PartialEq`), `CorporationStanding` is `Standing` and `CorporationBlueprint` is `Blueprint`.
+- **Breaking:** every `character_id` is now `i64` instead of `i32`: the path parameter of all character methods, the `character_id` fields of `CharacterAffiliation`, `CharacterLeaderboardItem` and the killmail structs, `IndustryJob::completed_character_id`, and the `character_ids` argument of `CharacterGroup::get_affiliation` (now `&[i64]`, was `&[u64]`).
+
+### Fixed
+
+- Successful responses with an empty body (such as `204 No Content`) no longer fail to parse when the return type is `()`.
+
 ## [0.1.0] - 2026-09-22
 
 ### Changed
