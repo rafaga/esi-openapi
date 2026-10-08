@@ -120,7 +120,7 @@ pub fn save_refresh_token(token: &str) -> std::io::Result<()> {
 
 /// Read the character ID from an access token's `sub` claim
 /// (`CHARACTER:EVE:<id>`), without validating the token.
-pub fn character_id_from_token(access_token: &str) -> Option<i32> {
+pub fn character_id_from_token(access_token: &str) -> Option<i64> {
     let payload = access_token.split('.').nth(1)?;
     let bytes = URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
@@ -130,7 +130,7 @@ pub fn character_id_from_token(access_token: &str) -> Option<i32> {
 /// Exchange the refresh token from `.env` for an access token, saving
 /// the rotated refresh token back to `.env` when EVE SSO issues a new one.
 /// Returns the client and the character ID.
-pub async fn authenticated_esi(cfg: &EnvConfig) -> Result<(Esi, i32), String> {
+pub async fn authenticated_esi(cfg: &EnvConfig) -> Result<(Esi, i64), String> {
     let refresh_token = cfg
         .refresh_token
         .as_deref()

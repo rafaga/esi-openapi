@@ -1,3 +1,4 @@
+use crate::groups::Position;
 use crate::prelude::*;
 
 /// Endpoints for Assets
@@ -14,29 +15,21 @@ pub struct Asset {
     pub location_flag: String,
     pub location_id: i64,
     pub location_type: String,
-    pub quantity: i32,
-    pub type_id: i32,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(missing_docs)]
-pub struct AssetLocationPosition {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    pub quantity: i64,
+    pub type_id: i64,
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct AssetLocation {
     pub item_id: i64,
-    pub position: AssetLocationPosition,
+    pub position: Position,
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct AssetName {
-    pub item_id: u64,
+    pub item_id: i64,
     pub name: String,
 }
 
@@ -47,7 +40,7 @@ impl AssetsGroup<'_> {
         "GetCharactersCharacterIdAssets",
         RequestType::Authenticated,
         Vec<Asset>,
-        (character_id: i32) => "{character_id}"
+        (character_id: i64) => "{character_id}"
     );
 
     api_post!(
@@ -56,8 +49,8 @@ impl AssetsGroup<'_> {
         "PostCharactersCharacterIdAssetsLocations",
         RequestType::Authenticated,
         Vec<AssetLocation>,
-        (character_id: i32) => "{character_id}",
-        item_ids: &[i64],
+        (character_id: i64) => "{character_id}"
+        ; Chunked(item_ids: &[i64], 1000)
     );
 
     api_post!(
@@ -66,8 +59,8 @@ impl AssetsGroup<'_> {
         "PostCharactersCharacterIdAssetsNames",
         RequestType::Authenticated,
         Vec<AssetName>,
-        (character_id: i32) => "{character_id}",
-        item_ids: &[u64],
+        (character_id: i64) => "{character_id}"
+        ; Chunked(item_ids: &[i64], 1000)
     );
 
     api_get!(
@@ -78,7 +71,7 @@ impl AssetsGroup<'_> {
         "GetCorporationsCorporationIdAssets",
         RequestType::Authenticated,
         Vec<Asset>,
-        (corporation_id: u64) => "{corporation_id}"
+        (corporation_id: i64) => "{corporation_id}"
     );
 
     api_post!(
@@ -89,8 +82,8 @@ impl AssetsGroup<'_> {
         "PostCorporationsCorporationIdAssetsLocations",
         RequestType::Authenticated,
         Vec<AssetLocation>,
-        (corporation_id: u64) => "{corporation_id}",
-        item_ids: &[u64],
+        (corporation_id: i64) => "{corporation_id}"
+        ; Chunked(item_ids: &[i64], 1000)
     );
 
     api_post!(
@@ -101,7 +94,7 @@ impl AssetsGroup<'_> {
         "PostCorporationsCorporationIdAssetsNames",
         RequestType::Authenticated,
         Vec<AssetName>,
-        (corporation_id: u64) => "{corporation_id}",
-        item_ids: &[u64],
+        (corporation_id: i64) => "{corporation_id}"
+        ; Chunked(item_ids: &[i64], 1000)
     );
 }

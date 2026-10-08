@@ -80,7 +80,60 @@ pub struct EsiBuilder {
     pub(crate) refresh_token: Option<String>,
     pub(crate) user_agent: Option<String>,
     pub(crate) http_timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cache_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cache_max_entries: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cache_max_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) rate_limit_policy: Option<RateLimitPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) page_concurrency: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) language: Option<Language>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tenant: Option<String>,
     pub(crate) spec: Option<Spec>,
+}
+
+/// Languages ESI can answer in (the `Accept-Language` header).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    /// English (the default).
+    #[default]
+    En,
+    /// German.
+    De,
+    /// French.
+    Fr,
+    /// Japanese.
+    Ja,
+    /// Russian.
+    Ru,
+    /// Chinese.
+    Zh,
+    /// Korean.
+    Ko,
+    /// Spanish.
+    Es,
+}
+
+impl Language {
+    /// The value of the `Accept-Language` header.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Language::En => "en",
+            Language::De => "de",
+            Language::Fr => "fr",
+            Language::Ja => "ja",
+            Language::Ru => "ru",
+            Language::Zh => "zh",
+            Language::Ko => "ko",
+            Language::Es => "es",
+        }
+    }
 }
 
 impl EsiBuilder {
@@ -226,6 +279,71 @@ impl EsiBuilder {
         Ok(builder.build()?)
     }
 
+    /// Limit how many responses the cache keeps (1024 by default). When it is
+    /// full, expired entries are dropped first and then the oldest ones.
+    /// Has no effect unless the cache is enabled with [`EsiBuilder::enable_cache`].
+    pub fn cache_max_entries(mut self, val: usize) -> Self {
+        self.cache_max_entries = Some(val);
+        self
+    }
+
+    /// Limit how many bytes the cache keeps (no limit by default), counting the
+    /// bodies, validators, headers and keys it stores. It applies together with
+    /// [`EsiBuilder::cache_max_entries`]: when a response does not fit in either
+    /// limit, entries are dropped in the same order. A response larger than the
+    /// limit by itself is not cached. Has no effect unless the cache is enabled
+    /// with [`EsiBuilder::enable_cache`].
+    pub fn cache_max_bytes(mut self, val: usize) -> Self {
+        self.cache_max_bytes = Some(val);
+        self
+    }
+
+    /// Choose what the client does when a route group has no rate-limit tokens
+    /// left for a request ([`RateLimitPolicy::Off`] by default): wait until the
+    /// request fits, or fail without calling ESI.
+    ///
+    /// The balance is tracked per route group and access token, from the
+    /// `X-Ratelimit-*` headers of the responses, and only for operations that
+    /// declare a group in the spec, so the spec must be loaded.
+    pub fn rate_limit_policy(mut self, val: RateLimitPolicy) -> Self {
+        self.rate_limit_policy = Some(val);
+        self
+    }
+
+    /// How many pages `Esi::fetch_all_pages` requests at the same time once it
+    /// knows the page count (4 by default; 1 makes it sequential).
+    pub fn page_concurrency(mut self, val: usize) -> Self {
+        self.page_concurrency = Some(val);
+        self
+    }
+
+    /// Set the language of the responses (the `Accept-Language` header).
+    ///
+    /// ESI answers in English when it is not set.
+    pub fn language(mut self, val: Language) -> Self {
+        self.language = Some(val);
+        self
+    }
+
+    /// Set the tenant (the `X-Tenant` header). ESI uses `tranquility` when it is
+    /// not set.
+    pub fn tenant(mut self, val: &str) -> Self {
+        self.tenant = Some(val.to_owned());
+        self
+    }
+
+    /// Keep `GET` responses in memory and revalidate them with `ETag` /
+    /// `Last-Modified` (disabled by default).
+    ///
+    /// While an entry is younger than the operation's `x-client-cache-ttl` in the
+    /// spec (or the `max-age` of the response when the spec has none) it is served
+    /// without calling ESI; afterwards it is revalidated and a `304 Not Modified`
+    /// reuses the stored body. Entries are kept per access token.
+    pub fn enable_cache(mut self, val: bool) -> Self {
+        self.cache_enabled = Some(val);
+        self
+    }
+
     /// Construct the `Esi` instance.
     ///
     /// There are a few things that could go wrong, like
@@ -240,6 +358,21 @@ impl EsiBuilder {
 mod tests {
     use super::EsiBuilder;
     use crate::spec::Spec;
+
+    #[test]
+    fn test_language_and_tenant() {
+        let esi = EsiBuilder::new()
+            .user_agent("d")
+            .language(super::Language::De)
+            .tenant("singularity")
+            .build()
+            .unwrap();
+        assert_eq!(esi.language, Some(super::Language::De));
+        assert_eq!(esi.tenant.as_deref(), Some("singularity"));
+        assert_eq!(super::Language::Ko.as_str(), "ko");
+        let json = serde_json::to_string(&EsiBuilder::new().language(super::Language::Fr)).unwrap();
+        assert!(json.contains("\"language\":\"fr\""));
+    }
 
     #[test]
     fn test_builder_valid() {

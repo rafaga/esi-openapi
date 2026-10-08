@@ -1,12 +1,15 @@
 //! Main logic
 
 use crate::{
+    cache::{CacheEntry, ResponseCache},
     client::ErrorLimitStatus::{Limited, NotLimited},
+    cursor_page::CursorPage,
     groups::*,
     legacy,
     pkce::{self, PkceVerifier},
     prelude::*,
-    spec::Spec,
+    rate_limiter::{Acquire, Permit, RateLimiter},
+    spec::{Spec, SpecIndex},
 };
 use base64::engine::{general_purpose::STANDARD as base64, Engine};
 use log::{debug, error, warn};
@@ -16,7 +19,7 @@ use reqwest::{
     header::{self, HeaderMap, HeaderValue},
     Client, Method,
 };
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     collections::HashMap,
     str::FromStr,
@@ -37,6 +40,9 @@ const RATE_LIMIT_REMAINING_HEADER: &str = "x-ratelimit-remaining";
 const RATE_LIMIT_USED_HEADER: &str = "x-ratelimit-used";
 
 static COMPATIBILITY_HEADER: &str = "X-Compatibility-Date";
+static TENANT_HEADER: &str = "X-Tenant";
+/// The largest `limit` the spec allows on cursor-paginated operations.
+const CURSOR_PAGE_LIMIT: &str = "100";
 /// The default compatibility date to use if none is specified
 /// in the builder: the latest date listed by
 /// `https://esi.evetech.net/meta/compatibility-dates` when this
@@ -76,6 +82,17 @@ pub enum ErrorLimitStatus {
     },
     /// Requests may be made.
     NotLimited,
+}
+
+/// What is known about the download of the spec held by an [`Esi`].
+#[derive(Clone, Debug)]
+struct SpecInfo {
+    /// The compatibility date the spec was requested with.
+    compatibility_date: String,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    /// Unix time in milliseconds until which the spec needs no new request.
+    expires_at: i64,
 }
 
 /// Latest rate-limit state ESI reported for one route group.
@@ -131,7 +148,7 @@ fn parse_rate_limit(value: &str) -> (Option<u64>, Option<u64>) {
 /// Which base URL to start with - the public URL for unauthenticated
 /// calls, or the authenticated URL for making calls to endpoints that
 /// require an access token.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestType {
     /// Endpoints that do not require authentication
     Public,
@@ -190,10 +207,24 @@ pub struct Esi {
     /// HTTP client
     pub(crate) client: Client,
     pub(crate) spec: Option<Spec>,
-    /// `operationId` -> URL path, built from `spec`.
-    op_index: HashMap<String, String>,
+    /// How and when the spec was downloaded, if it was; see `update_spec`.
+    spec_info: Option<SpecInfo>,
+    /// Lookup tables built from `spec`.
+    index: SpecIndex,
     error_limit_state: Arc<RwLock<Option<ErrorLimitState>>>,
     rate_limits: Arc<RwLock<HashMap<String, RateLimitStatus>>>,
+    /// Budgets by route group and access token, used by `rate_limit_policy`.
+    limiter: Arc<RateLimiter>,
+    /// What to do when a route group has no tokens left.
+    pub(crate) rate_limit_policy: RateLimitPolicy,
+    /// Cached `GET` responses, when the cache is enabled.
+    cache: Option<Arc<RwLock<ResponseCache>>>,
+    /// Pages requested at the same time by `fetch_all_pages`.
+    pub(crate) page_concurrency: usize,
+    /// Language of the responses (`Accept-Language`), if set.
+    pub(crate) language: Option<Language>,
+    /// Tenant (`X-Tenant`), if set.
+    pub(crate) tenant: Option<String>,
 }
 
 impl Esi {
@@ -203,10 +234,10 @@ impl Esi {
         let compatibility_date = builder
             .compatibility_date
             .unwrap_or_else(|| COMPATIBILITY_DATE_DEFAULT.to_owned());
-        let op_index = builder
+        let index = builder
             .spec
             .as_ref()
-            .map(Spec::operation_index)
+            .map(SpecIndex::new)
             .unwrap_or_default();
         let e = Esi {
             compatibility_date: compatibility_date.clone(),
@@ -224,9 +255,23 @@ impl Esi {
             refresh_token: builder.refresh_token,
             client,
             spec: builder.spec,
-            op_index,
+            spec_info: None,
+            index,
             error_limit_state: Arc::new(RwLock::new(None)),
             rate_limits: Arc::new(RwLock::new(HashMap::new())),
+            limiter: Arc::new(RateLimiter::default()),
+            rate_limit_policy: builder.rate_limit_policy.unwrap_or_default(),
+            page_concurrency: builder.page_concurrency.unwrap_or(4).max(1),
+            language: builder.language,
+            tenant: builder.tenant.clone(),
+            cache: builder.cache_enabled.unwrap_or(false).then(|| {
+                Arc::new(RwLock::new(ResponseCache::with_limits(
+                    builder
+                        .cache_max_entries
+                        .unwrap_or(crate::cache::DEFAULT_MAX_ENTRIES),
+                    builder.cache_max_bytes,
+                )))
+            }),
         };
         Ok(e)
     }
@@ -257,30 +302,85 @@ impl Esi {
     /// #     .unwrap();
     /// esi.update_spec().await.unwrap();
     /// # }
+    /// ```
+    ///
+    /// This always makes a request. If the spec was downloaded before with the
+    /// same compatibility date and the server gave it an `ETag` or
+    /// `Last-Modified`, the request is conditional (`If-None-Match` /
+    /// `If-Modified-Since`) and a `304 Not Modified` keeps the spec in memory
+    /// instead of downloading it again. To skip the request while the spec is
+    /// still fresh, use [`Esi::ensure_spec_fresh`].
     pub async fn update_spec(&mut self) -> EsiResult<()> {
         debug!(
             "Updating spec with compatibility date {}",
             self.compatibility_date
         );
         self.assert_not_error_limited().await?;
-        let resp = self
-            .client
-            .get(&self.spec_url)
-            .header(
-                COMPATIBILITY_HEADER,
-                HeaderValue::from_str(&self.compatibility_date)?,
-            )
-            .send()
-            .await?;
+        let mut request = self.client.get(&self.spec_url).header(
+            COMPATIBILITY_HEADER,
+            HeaderValue::from_str(&self.compatibility_date)?,
+        );
+        let known = self.spec_info.as_ref().filter(|info| {
+            self.spec.is_some() && info.compatibility_date == self.compatibility_date
+        });
+        if let Some(info) = known {
+            if let Some(etag) = &info.etag {
+                request = request.header(header::IF_NONE_MATCH, HeaderValue::from_str(etag)?);
+            }
+            if let Some(modified) = &info.last_modified {
+                request =
+                    request.header(header::IF_MODIFIED_SINCE, HeaderValue::from_str(modified)?);
+            }
+        }
+        let resp = request.send().await?;
         self.process_response_headers(resp.headers()).await?;
+        if resp.status() == reqwest::StatusCode::NOT_MODIFIED && known.is_some() {
+            debug!("The spec has not changed");
+            let expires_at = Self::spec_expiry(resp.headers())?;
+            if let Some(info) = &mut self.spec_info {
+                info.expires_at = expires_at;
+            }
+            return Ok(());
+        }
         if !resp.status().is_success() {
             error!("Got status {} when requesting spec", resp.status());
             return Err(Self::status_error(resp.status().as_u16(), resp.headers()));
         }
+        let info = SpecInfo {
+            compatibility_date: self.compatibility_date.clone(),
+            etag: Self::header_text(resp.headers(), "etag"),
+            last_modified: Self::header_text(resp.headers(), "last-modified"),
+            expires_at: Self::spec_expiry(resp.headers())?,
+        };
         let data: Spec = resp.json().await?;
-        self.op_index = data.operation_index();
+        self.index = SpecIndex::new(&data);
         self.spec = Some(data);
+        self.spec_info = Some(info);
         Ok(())
+    }
+
+    /// Make sure the spec is loaded and still fresh, requesting it only if it is
+    /// not: it has not been downloaded by this struct (a spec given to the
+    /// builder has no known age), it was downloaded with another compatibility
+    /// date, or its `Cache-Control: max-age` has passed. Use it before a long
+    /// run of calls instead of [`Esi::update_spec`] to avoid needless downloads.
+    pub async fn ensure_spec_fresh(&mut self) -> EsiResult<()> {
+        let now = current_time_millis()?;
+        let fresh = self.spec.is_some()
+            && self.spec_info.as_ref().is_some_and(|info| {
+                info.compatibility_date == self.compatibility_date && info.expires_at > now
+            });
+        if fresh {
+            debug!("The spec is still fresh");
+            return Ok(());
+        }
+        self.update_spec().await
+    }
+
+    /// When a spec downloaded now needs a new request: `max-age` after now.
+    fn spec_expiry(headers: &HeaderMap) -> EsiResult<i64> {
+        let max_age = ResponseCache::max_age(headers).unwrap_or(0);
+        Ok(current_time_millis()?.saturating_add(max_age.saturating_mul(1000)))
     }
 
     /// Ensure the user has specified all required EVE Developer App information.
@@ -607,10 +707,239 @@ impl Esi {
         query: Option<&[(&str, &str)]>,
         body: Option<&str>,
     ) -> EsiResult<T> {
+        let (text, _) = self
+            .send_request(method, request_type, endpoint, query, body)
+            .await?;
+        Self::parse_body(&text)
+    }
+
+    /// Like [`Esi::query`], but also returns the total number of pages
+    /// reported by the `X-Pages` response header, if present.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # async fn run() {
+    /// # use esi_openapi::prelude::*;
+    /// # let esi = EsiBuilder::new()
+    /// #     .user_agent("some user agent")
+    /// #     .client_id("your_client_id")
+    /// #     .client_secret("your_client_secret")
+    /// #     .callback_url("your_callback_url")
+    /// #     .build()
+    /// #     .unwrap();
+    /// let (data, pages): (Vec<serde_json::Value>, Option<i64>) = esi
+    ///     .query_with_pages("GET", RequestType::Public, "some/path", Some(&[("page", "2")]))
+    ///     .await
+    ///     .unwrap();
+    /// # }
+    /// ```
+    pub async fn query_with_pages<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        request_type: RequestType,
+        endpoint: &str,
+        query: Option<&[(&str, &str)]>,
+    ) -> EsiResult<(T, Option<i64>)> {
+        let (text, headers) = self
+            .send_request(method, request_type, endpoint, query, None)
+            .await?;
+        Ok((Self::parse_body(&text)?, Self::pages_header(&headers)))
+    }
+
+    /// Fetch every page of an endpoint paginated with the `page` query
+    /// parameter and return the items of all pages, in order.
+    ///
+    /// The first page is requested with `page=1`; the `X-Pages` header of its
+    /// response says how many pages follow, and those are requested
+    /// concurrently, [`EsiBuilder::page_concurrency`] at a time. Pass the other
+    /// query parameters of the endpoint in `query`, without `page`. `max_pages`
+    /// limits how many pages are fetched (`None` for all of them).
+    pub async fn fetch_all_pages<T: DeserializeOwned>(
+        &self,
+        request_type: RequestType,
+        endpoint: &str,
+        query: Option<&[(&str, &str)]>,
+        max_pages: Option<i64>,
+    ) -> EsiResult<Vec<T>> {
+        let (mut items, total) = self
+            .fetch_page::<T>(request_type, endpoint, query, 1)
+            .await?;
+        let last = total.unwrap_or(1).min(max_pages.unwrap_or(i64::MAX));
+        let step = i64::try_from(self.page_concurrency).unwrap_or(1);
+        let mut next: i64 = 2;
+        while next <= last {
+            let end = (next + step - 1).min(last);
+            let batches = futures_util::future::try_join_all(
+                (next..=end).map(|page| self.fetch_page::<T>(request_type, endpoint, query, page)),
+            )
+            .await?;
+            for (mut batch, _) in batches {
+                items.append(&mut batch);
+            }
+            next = end + 1;
+        }
+        Ok(items)
+    }
+
+    /// Send a `POST` whose body is a JSON array and return the answers joined
+    /// in order, splitting `items` into requests of at most `chunk_size` items.
+    ///
+    /// Use it for endpoints that cap the length of the array (such as
+    /// `characters/affiliation`, at 1000 ids). The chunks are sent
+    /// concurrently, [`EsiBuilder::page_concurrency`] at a time. The answer to
+    /// each chunk must be an array; an empty `items` sends no request and
+    /// returns an empty list. Duplicates are not removed, and the spec asks for
+    /// unique items on most of these endpoints.
+    pub async fn post_chunked<B: Serialize, T: DeserializeOwned>(
+        &self,
+        request_type: RequestType,
+        endpoint: &str,
+        items: &[B],
+        chunk_size: usize,
+    ) -> EsiResult<Vec<T>> {
+        let chunks: Vec<&[B]> = items.chunks(chunk_size.max(1)).collect();
+        let mut results: Vec<T> = Vec::new();
+        for group in chunks.chunks(self.page_concurrency) {
+            let answers = futures_util::future::try_join_all(
+                group
+                    .iter()
+                    .map(|chunk| self.post_chunk::<B, T>(request_type, endpoint, chunk)),
+            )
+            .await?;
+            for mut answer in answers {
+                results.append(&mut answer);
+            }
+        }
+        Ok(results)
+    }
+
+    /// Send one chunk of a `POST` with an array body.
+    async fn post_chunk<B: Serialize, T: DeserializeOwned>(
+        &self,
+        request_type: RequestType,
+        endpoint: &str,
+        chunk: &[B],
+    ) -> EsiResult<Vec<T>> {
+        let body = serde_json::to_string(chunk)?;
+        self.query("POST", request_type, endpoint, None, Some(&body))
+            .await
+    }
+
+    /// Request one page of a `page`-paginated endpoint.
+    async fn fetch_page<T: DeserializeOwned>(
+        &self,
+        request_type: RequestType,
+        endpoint: &str,
+        query: Option<&[(&str, &str)]>,
+        page: i64,
+    ) -> EsiResult<(Vec<T>, Option<i64>)> {
+        let page_text = page.to_string();
+        let mut params: Vec<(&str, &str)> = query.unwrap_or(&[]).to_vec();
+        params.push(("page", page_text.as_str()));
+        self.query_with_pages("GET", request_type, endpoint, Some(&params))
+            .await
+    }
+
+    /// Fetch every page of an endpoint paginated with cursors (`x-pagination:
+    /// cursor`) and return the items of all pages, in order.
+    ///
+    /// `items_key` is the name of the array in the response that holds the
+    /// records, such as `"projects"` or `"listings"`. The walk follows the
+    /// `cursor.after` value of each response until a page has no records or no
+    /// further cursor. Pass the other query parameters of the endpoint (such as
+    /// `limit`) in `query`, without `after` or `before`. Unless `query` has a
+    /// `limit`, the maximum the spec allows (100, against a default of 10) is
+    /// requested to need fewer calls. `max_pages` limits how many pages are
+    /// fetched (`None` for all of them).
+    pub async fn fetch_all_cursor<T: DeserializeOwned>(
+        &self,
+        request_type: RequestType,
+        endpoint: &str,
+        query: Option<&[(&str, &str)]>,
+        items_key: &str,
+        max_pages: Option<i64>,
+    ) -> EsiResult<Vec<T>> {
+        let mut items: Vec<T> = Vec::new();
+        let mut after = String::from("0");
+        let mut fetched: i64 = 0;
+        loop {
+            let mut params: Vec<(&str, &str)> = query.unwrap_or(&[]).to_vec();
+            if !params.iter().any(|(key, _)| *key == "limit") {
+                params.push(("limit", CURSOR_PAGE_LIMIT));
+            }
+            params.push(("after", after.as_str()));
+            let (text, _) = self
+                .send_request("GET", request_type, endpoint, Some(&params), None)
+                .await?;
+            let page = CursorPage::<T>::parse(&text, items_key)?;
+            fetched += 1;
+            let empty = page.records.is_empty();
+            let next = page.next;
+            items.extend(page.records);
+            match next {
+                Some(next)
+                    if !empty && next != after && fetched < max_pages.unwrap_or(i64::MAX) =>
+                {
+                    after = next;
+                }
+                _ => return Ok(items),
+            }
+        }
+    }
+
+    /// The total number of pages from the `X-Pages` header.
+    fn pages_header(headers: &HeaderMap) -> Option<i64> {
+        headers
+            .get("x-pages")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse().ok())
+    }
+
+    /// Read a response body as JSON. A body that is empty (such as `204 No
+    /// Content`) is read as JSON `null`, so `()` and `Option<_>` return types
+    /// work for it.
+    fn parse_body<T: DeserializeOwned>(text: &str) -> EsiResult<T> {
+        let text = if text.trim().is_empty() { "null" } else { text };
+        Ok(serde_json::from_str(text)?)
+    }
+
+    /// Send a request and return the body text and the response headers.
+    async fn send_request(
+        &self,
+        method: &str,
+        request_type: RequestType,
+        endpoint: &str,
+        query: Option<&[(&str, &str)]>,
+        body: Option<&str>,
+    ) -> EsiResult<(String, HeaderMap)> {
         debug!("Making {request_type:?} {method} request to {endpoint} with query: {query:?}");
+        let cache_key = self.cache_key(method, &request_type, endpoint, query);
+        let mut stored: Option<CacheEntry> = None;
+        if let Some(key) = &cache_key {
+            if let Some(entry) = self.cache_lookup(key).await {
+                if entry.expires_at > current_time_millis()? {
+                    debug!("Serving {endpoint} from the cache");
+                    return Ok((entry.body, entry.headers));
+                }
+                stored = Some(entry);
+            }
+        }
         self.assert_not_error_limited().await?;
         self.check_authentication(&request_type)?;
-        let headers = self.request_headers(&request_type)?;
+        let bucket = self.bucket_key(method, &request_type, endpoint);
+        let _permit = match &bucket {
+            Some(key) => Some(self.acquire_permit(key).await?),
+            None => None,
+        };
+        let mut headers = self.request_headers(&request_type)?;
+        if let Some(entry) = &stored {
+            if let Some(etag) = &entry.etag {
+                headers.insert(header::IF_NONE_MATCH, HeaderValue::from_str(etag)?);
+            }
+            if let Some(modified) = &entry.last_modified {
+                headers.insert(header::IF_MODIFIED_SINCE, HeaderValue::from_str(modified)?);
+            }
+        }
         let url = format!("{}{endpoint}", self.base_api_url);
         let mut req_builder = self
             .client
@@ -623,13 +952,131 @@ impl Esi {
         };
         let req = req_builder.build()?;
         let resp = self.client.execute(req).await?;
-        self.process_response_headers(resp.headers()).await?;
-        if !resp.status().is_success() {
-            return Err(Self::status_error(resp.status().as_u16(), resp.headers()));
+        let rate_limit = self.process_response_headers(resp.headers()).await?;
+        if let Some(key) = &bucket {
+            self.record_budget(key, rate_limit.as_ref(), resp.status(), resp.headers())?;
         }
+        if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+            if let (Some(key), Some(entry)) = (&cache_key, stored) {
+                debug!("{endpoint} not modified; reusing the cached body");
+                let expires_at = self.cache_expiry(endpoint, resp.headers())?;
+                self.cache_refresh(key, expires_at).await;
+                return Ok((entry.body, entry.headers));
+            }
+        }
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            if matches!(status, 404 | 410) {
+                if let Some(ttl) = self.index.tombstone_ttl(endpoint) {
+                    return Err(EsiError::Gone {
+                        status,
+                        tombstone_ttl_secs: ttl,
+                    });
+                }
+            }
+            return Err(Self::status_error(status, resp.headers()));
+        }
+        let headers = resp.headers().clone();
         let text = resp.text().await?;
-        let data: T = serde_json::from_str(&text)?;
-        Ok(data)
+        if let Some(key) = cache_key {
+            let entry = CacheEntry {
+                etag: Self::header_text(&headers, "etag"),
+                last_modified: Self::header_text(&headers, "last-modified"),
+                body: text.clone(),
+                headers: headers.clone(),
+                expires_at: self.cache_expiry(endpoint, &headers)?,
+                last_used: 0,
+            };
+            self.cache_store(key, entry).await?;
+        }
+        Ok((text, headers))
+    }
+
+    /// The cache key of a request, if the cache is enabled and the request is a `GET`.
+    fn cache_key(
+        &self,
+        method: &str,
+        request_type: &RequestType,
+        endpoint: &str,
+        query: Option<&[(&str, &str)]>,
+    ) -> Option<String> {
+        self.cache.as_ref()?;
+        if !method.eq_ignore_ascii_case("GET") {
+            return None;
+        }
+        let token = match request_type {
+            RequestType::Authenticated => self.access_token.as_deref(),
+            RequestType::Public => None,
+        };
+        let url = format!("{}{endpoint}", self.base_api_url);
+        let variant = format!(
+            "{}|{}",
+            self.language.map_or("", |l| l.as_str()),
+            self.tenant.as_deref().unwrap_or("")
+        );
+        Some(ResponseCache::key(
+            token,
+            &variant,
+            &url,
+            query.unwrap_or(&[]),
+        ))
+    }
+
+    /// The cached entry for a key, marking it as recently used.
+    async fn cache_lookup(&self, key: &str) -> Option<CacheEntry> {
+        self.cache.as_ref()?.write().await.lookup(key)
+    }
+
+    async fn cache_store(&self, key: String, entry: CacheEntry) -> EsiResult<()> {
+        if let Some(cache) = &self.cache {
+            cache
+                .write()
+                .await
+                .insert(key, entry, current_time_millis()?);
+        }
+        Ok(())
+    }
+
+    async fn cache_refresh(&self, key: &str, expires_at: i64) {
+        if let Some(cache) = &self.cache {
+            cache.write().await.refresh(key, expires_at);
+        }
+    }
+
+    /// When a response stored now stops being served without revalidation: the
+    /// `x-client-cache-ttl` of the operation in the spec, else the `max-age`
+    /// of the response, else immediately.
+    fn cache_expiry(&self, endpoint: &str, headers: &HeaderMap) -> EsiResult<i64> {
+        let ttl = self
+            .index
+            .client_cache_ttl(endpoint)
+            .or_else(|| ResponseCache::max_age(headers))
+            .unwrap_or(0);
+        Ok(current_time_millis()? + ttl * 1000)
+    }
+
+    fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    }
+
+    /// The number of responses held by the cache (0 when it is disabled).
+    pub async fn cache_len(&self) -> usize {
+        match &self.cache {
+            Some(cache) => cache.read().await.len(),
+            None => 0,
+        }
+    }
+
+    /// The approximate size in bytes of the responses held by the cache (0 when
+    /// it is disabled). See [`EsiBuilder::cache_max_bytes`].
+    pub async fn cache_bytes(&self) -> usize {
+        match &self.cache {
+            Some(cache) => cache.read().await.bytes(),
+            None => 0,
+        }
     }
 
     /// For an authenticated request, fails unless there is a valid, unexpired
@@ -666,6 +1113,15 @@ impl Esi {
             COMPATIBILITY_HEADER,
             HeaderValue::from_str(&self.compatibility_date)?,
         );
+        if let Some(language) = self.language {
+            map.insert(
+                header::ACCEPT_LANGUAGE,
+                HeaderValue::from_static(language.as_str()),
+            );
+        }
+        if let Some(tenant) = &self.tenant {
+            map.insert(TENANT_HEADER, HeaderValue::from_str(tenant)?);
+        }
         Ok(map)
     }
 
@@ -741,18 +1197,58 @@ impl Esi {
         if self.spec.is_none() {
             return Err(EsiError::EmptySpec);
         }
-        if let Some(path) = self.op_index.get(op_id) {
-            return Ok(path.clone());
+        if let Some(path) = self.index.path(op_id) {
+            return Ok(path.to_owned());
         }
         if let Some(new_id) = legacy::openapi_id_for(op_id) {
             warn!(
                 "operationId '{op_id}' is a deprecated Swagger ID; use '{new_id}' instead (legacy IDs will be removed in 0.2.0)"
             );
-            if let Some(path) = self.op_index.get(new_id) {
-                return Ok(path.clone());
+            if let Some(path) = self.index.path(new_id) {
+                return Ok(path.to_owned());
             }
         }
         Err(EsiError::UnknownOperationID(op_id.to_owned()))
+    }
+
+    /// The operation's metadata from the spec.
+    fn spec_operation(&self, op_id: &str) -> EsiResult<&crate::spec::SpecPathMethod> {
+        let spec = self.spec.as_ref().ok_or(EsiError::EmptySpec)?;
+        self.index
+            .operation(spec, op_id)
+            .ok_or_else(|| EsiError::UnknownOperationID(op_id.to_owned()))
+    }
+
+    /// The OAuth2 scopes an operation needs, from the spec. Public operations need none.
+    pub fn required_scopes(&self, op_id: &str) -> EsiResult<Vec<String>> {
+        Ok(self.spec_operation(op_id)?.scopes())
+    }
+
+    /// The scopes an operation needs that are not in `granted`, a space-separated
+    /// scope list such as the `scope` value of a token. Use it to fail early instead
+    /// of making a request ESI will answer with `401`.
+    pub fn missing_scopes(&self, op_id: &str, granted: &str) -> EsiResult<Vec<String>> {
+        let granted: Vec<&str> = granted.split_whitespace().collect();
+        Ok(self
+            .required_scopes(op_id)?
+            .into_iter()
+            .filter(|scope| !granted.contains(&scope.as_str()))
+            .collect())
+    }
+
+    /// The corporation roles of which the character needs at least one for an
+    /// operation (empty when it needs none).
+    pub fn required_roles(&self, op_id: &str) -> EsiResult<Vec<String>> {
+        Ok(self.spec_operation(op_id)?.required_roles.clone())
+    }
+
+    /// The rate limit each route group declares in the spec, keyed by group.
+    ///
+    /// These are the budgets before any response arrives; [`Esi::rate_limit_status`]
+    /// has the live values once ESI has answered for a group.
+    pub fn declared_rate_limits(&self) -> EsiResult<HashMap<String, crate::spec::SpecRateLimit>> {
+        let spec = self.spec.as_ref().ok_or(EsiError::EmptySpec)?;
+        Ok(spec.rate_limit_groups())
     }
 
     /// Build the error for a non-success response status.
@@ -760,8 +1256,7 @@ impl Esi {
         if status == 429 {
             let header_str = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
             let group = header_str(RATE_LIMIT_GROUP_HEADER).map(str::to_owned);
-            let retry_after_secs =
-                header_str(header::RETRY_AFTER.as_str()).and_then(|v| v.trim().parse::<u64>().ok());
+            let retry_after_secs = Self::retry_after_secs(headers);
             warn!("Rate limited by ESI (group {group:?}); retry after {retry_after_secs:?}s");
             return EsiError::RateLimited {
                 group,
@@ -772,14 +1267,22 @@ impl Esi {
     }
 
     /// Record the error-limit and rate-limit headers of a response.
-    async fn process_response_headers(&self, headers: &HeaderMap) -> Result<(), EsiError> {
+    ///
+    /// Returns the rate-limit status the response reported, if it has one.
+    async fn process_response_headers(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<Option<RateLimitStatus>, EsiError> {
         self.process_error_limit_headers(headers).await?;
         self.process_rate_limit_headers(headers).await
     }
 
-    async fn process_rate_limit_headers(&self, headers: &HeaderMap) -> Result<(), EsiError> {
+    async fn process_rate_limit_headers(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<Option<RateLimitStatus>, EsiError> {
         let Some(group) = headers.get(RATE_LIMIT_GROUP_HEADER) else {
-            return Ok(());
+            return Ok(None);
         };
         let group = group.to_str()?.to_owned();
         let limit = match headers.get(RATE_LIMIT_LIMIT_HEADER) {
@@ -809,8 +1312,99 @@ impl Esi {
             updated_at_millis: current_time_millis()?,
         };
         debug!("Rate limit status: {status:?}");
-        self.rate_limits.write().await.insert(group, status);
+        self.rate_limits.write().await.insert(group, status.clone());
+        Ok(Some(status))
+    }
+
+    /// The key of the budget a request spends from, when throttling is on and the
+    /// spec says which route group the operation belongs to.
+    fn bucket_key(
+        &self,
+        method: &str,
+        request_type: &RequestType,
+        endpoint: &str,
+    ) -> Option<String> {
+        if self.rate_limit_policy == RateLimitPolicy::Off {
+            return None;
+        }
+        let group = self.index.rate_limit_group(method, endpoint)?;
+        let token = match request_type {
+            RequestType::Authenticated => self.access_token.as_deref(),
+            RequestType::Public => None,
+        };
+        Some(RateLimiter::key(group, token))
+    }
+
+    /// Reserve budget for a request, sleeping or failing as the policy says when
+    /// it does not fit.
+    async fn acquire_permit(&self, key: &str) -> EsiResult<Permit> {
+        let started = current_time_millis()?;
+        loop {
+            let now = current_time_millis()?;
+            let Acquire::Wait(wait_ms) = self.limiter.try_acquire(key, now) else {
+                return Ok(Permit::new(Arc::clone(&self.limiter), key));
+            };
+            let allowed_ms = match self.rate_limit_policy {
+                RateLimitPolicy::Wait { max_wait } => {
+                    i64::try_from(max_wait.as_millis()).unwrap_or(i64::MAX)
+                }
+                RateLimitPolicy::Off | RateLimitPolicy::Fail => 0,
+            };
+            if (now - started).saturating_add(wait_ms) > allowed_ms {
+                let group = RateLimiter::group_of(key).to_owned();
+                warn!("Not sending a request: group {group} has no tokens for {wait_ms}ms");
+                return Err(EsiError::RateLimited {
+                    group: Some(group),
+                    retry_after_secs: Some(u64::try_from((wait_ms + 999) / 1000).unwrap_or(0)),
+                });
+            }
+            debug!("Waiting {wait_ms}ms for rate-limit tokens of {key}");
+            tokio::time::sleep(std::time::Duration::from_millis(
+                u64::try_from(wait_ms).unwrap_or(0),
+            ))
+            .await;
+        }
+    }
+
+    /// Feed a response to the budget of its route group.
+    fn record_budget(
+        &self,
+        key: &str,
+        status: Option<&RateLimitStatus>,
+        http_status: reqwest::StatusCode,
+        headers: &HeaderMap,
+    ) -> EsiResult<()> {
+        let now = current_time_millis()?;
+        if let Some(status) = status {
+            let window_ms = status
+                .window_secs
+                .and_then(|secs| i64::try_from(secs).ok())
+                .map_or(0, |secs| secs.saturating_mul(1000));
+            self.limiter.record(
+                key,
+                status.remaining,
+                status.used,
+                window_ms,
+                http_status.is_success(),
+                now,
+            );
+        }
+        if http_status.as_u16() == 429 {
+            if let Some(secs) = Self::retry_after_secs(headers) {
+                let secs = i64::try_from(secs).unwrap_or(0);
+                self.limiter
+                    .block_until(key, now.saturating_add(secs.saturating_mul(1000)));
+            }
+        }
         Ok(())
+    }
+
+    /// The seconds in a `Retry-After` header, if it has them.
+    fn retry_after_secs(headers: &HeaderMap) -> Option<u64> {
+        headers
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse().ok())
     }
 
     /// Latest rate-limit status ESI reported for a route group
@@ -893,6 +1487,16 @@ impl Esi {
         self.spec.as_ref()
     }
 
+    /// Call endpoints under the "Access List" group in ESI.
+    pub fn group_access_list(&self) -> AccessListGroup<'_> {
+        AccessListGroup { esi: self }
+    }
+
+    /// Call endpoints under the "Activities" group in ESI.
+    pub fn group_activities(&self) -> ActivitiesGroup<'_> {
+        ActivitiesGroup { esi: self }
+    }
+
     /// Call endpoints under the "alliance" group in ESI.
     pub fn group_alliance(&self) -> AllianceGroup<'_> {
         AllianceGroup { esi: self }
@@ -936,6 +1540,11 @@ impl Esi {
     /// Call endpoints under the "Corporation" group in ESI.
     pub fn group_corporation(&self) -> CorporationGroup<'_> {
         CorporationGroup { esi: self }
+    }
+
+    /// Call endpoints under the "Corporation Projects" group in ESI.
+    pub fn group_corporation_projects(&self) -> CorporationProjectsGroup<'_> {
+        CorporationProjectsGroup { esi: self }
     }
 
     /// Call endpoints under the "Dogma" group in ESI.
@@ -1013,6 +1622,31 @@ impl Esi {
         RoutesGroup { esi: self }
     }
 
+    /// Call endpoints under the "Cosmetics" group in ESI.
+    pub fn group_cosmetics(&self) -> CosmeticsGroup<'_> {
+        CosmeticsGroup { esi: self }
+    }
+
+    /// Call endpoints under the "Paragon Hub" group in ESI.
+    pub fn group_paragon_hub(&self) -> ParagonHubGroup<'_> {
+        ParagonHubGroup { esi: self }
+    }
+
+    /// Call endpoints under the "Freelance Jobs" group in ESI.
+    pub fn group_freelance_jobs(&self) -> FreelanceJobsGroup<'_> {
+        FreelanceJobsGroup { esi: self }
+    }
+
+    /// Call endpoints under the "Military Campaigns" group in ESI.
+    pub fn group_military_campaigns(&self) -> MilitaryCampaignsGroup<'_> {
+        MilitaryCampaignsGroup { esi: self }
+    }
+
+    /// Call endpoints under the "Meta" group in ESI.
+    pub fn group_meta(&self) -> MetaGroup<'_> {
+        MetaGroup { esi: self }
+    }
+
     /// Call endpoints under the "Search" group in ESI.
     pub fn group_search(&self) -> SearchGroup<'_> {
         SearchGroup { esi: self }
@@ -1026,6 +1660,11 @@ impl Esi {
     /// Call endpoints under the "Sovereignty" group in ESI.
     pub fn group_sovereignty(&self) -> SovereigntyGroup<'_> {
         SovereigntyGroup { esi: self }
+    }
+
+    /// Call endpoints under the "Structures" group in ESI.
+    pub fn group_structures(&self) -> StructuresGroup<'_> {
+        StructuresGroup { esi: self }
     }
 
     /// Call endpoints under the "Status" group in ESI.
@@ -1073,6 +1712,43 @@ mod tests {
     use crate::errors::EsiError;
     use crate::prelude::EsiBuilder;
     use crate::spec::Spec;
+
+    #[test]
+    fn test_spec_metadata_helpers() {
+        let spec: Spec = serde_json::from_str(FIXTURE).unwrap();
+        let esi = EsiBuilder::new()
+            .user_agent("t")
+            .spec(Some(spec))
+            .build()
+            .unwrap();
+        let op = "GetCorporationsCorporationIdBlueprints";
+        assert_eq!(esi.required_roles(op).unwrap(), ["Director"]);
+        assert_eq!(
+            esi.missing_scopes(op, "esi-assets.read_assets.v1").unwrap(),
+            ["esi-corporations.read_blueprints.v1"]
+        );
+        assert!(esi
+            .missing_scopes(op, "a esi-corporations.read_blueprints.v1")
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            esi.required_scopes("Nope"),
+            Err(EsiError::UnknownOperationID(_))
+        ));
+        assert!(esi.declared_rate_limits().unwrap().len() > 5);
+    }
+
+    #[test]
+    fn test_pages_header_and_empty_body() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(Esi::pages_header(&headers), None);
+        headers.insert("x-pages", "7".parse().unwrap());
+        assert_eq!(Esi::pages_header(&headers), Some(7));
+        let unit: () = Esi::parse_body("").unwrap();
+        assert_eq!(unit, ());
+        let numbers: Vec<i64> = Esi::parse_body("[1, 2]").unwrap();
+        assert_eq!(numbers, [1, 2]);
+    }
     use http::{HeaderMap, HeaderValue};
     use std::time::Duration;
 

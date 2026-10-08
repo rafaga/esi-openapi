@@ -1,12 +1,13 @@
 //! Module for easy imports.
 
-pub use crate::builders::EsiBuilder;
+pub use crate::builders::{EsiBuilder, Language};
 pub use crate::client::{
     AuthenticationInformation, ErrorLimitStatus, Esi, RateLimitStatus, RequestType,
     COMPATIBILITY_DATE_DEFAULT,
 };
 pub use crate::errors::{EsiError, EsiResult};
 pub use crate::pkce::PkceVerifier;
+pub use crate::rate_limiter::RateLimitPolicy;
 pub use crate::spec::Spec;
 pub(crate) use serde::{Deserialize, Serialize};
 
