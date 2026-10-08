@@ -8,12 +8,12 @@ pub struct IncursionsGroup<'a> {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct Incursion {
-    pub constellation_id: i32,
-    pub faction_id: i32,
+    pub constellation_id: i64,
+    pub faction_id: i64,
     pub has_boss: bool,
-    pub infested_solar_systems: Vec<u32>,
+    pub infested_solar_systems: Vec<i64>,
     pub influence: f64,
-    pub staging_solar_system_id: i32,
+    pub staging_solar_system_id: i64,
     pub state: String,
     #[serde(rename = "type")]
     pub incursion_type: String,

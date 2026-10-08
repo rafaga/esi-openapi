@@ -1,0 +1,82 @@
+name: Spec drift
+
+# Compares the live ESI OpenAPI spec with the fixture in
+# `resources/test/openapi.json` and opens (or updates) an issue when they
+# differ, or when ESI offers a compatibility date newer than the one the crate
+# uses. It runs weekly and can be run by hand.
+#
+# The issue only reports the difference; updating the fixture and the code is
+# done in a pull request.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  spec-diff:
+    name: spec-diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ESI: https://esi.evetech.net
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the compatibility date the crate uses
+        id: crate
+        run: |
+          date=$(grep -oP 'COMPATIBILITY_DATE_DEFAULT: &str = "\K[0-9-]+' src/client.rs)
+          test -n "$date"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+
+      - name: Download the live spec and the available dates
+        run: |
+          curl -fsS --retry 3 -H "X-Compatibility-Date: ${{ steps.crate.outputs.date }}" \
+            "$ESI/meta/openapi.json" -o live.json
+          curl -fsS --retry 3 "$ESI/meta/compatibility-dates" -o dates.json
+
+      - name: Compare
+        id: diff
+        run: |
+          jq -S . live.json > live.sorted.json
+          jq -S . resources/test/openapi.json > fixture.sorted.json
+          jq -r '.paths | to_entries[] | .key as $p | .value | to_entries[] | select(.value|type=="object" and has("operationId")) | "\(.value.operationId) \(.key|ascii_upcase) \($p)"' live.json | sort > live.ops
+          jq -r '.paths | to_entries[] | .key as $p | .value | to_entries[] | select(.value|type=="object" and has("operationId")) | "\(.value.operationId) \(.key|ascii_upcase) \($p)"' resources/test/openapi.json | sort > fixture.ops
+          newest=$(jq -r '(.compatibility_dates // .) | max' dates.json)
+          {
+            echo "## Spec drift"
+            echo
+            echo "Compatibility date used by the crate: \`${{ steps.crate.outputs.date }}\`. Newest offered by ESI: \`$newest\`."
+            echo
+            echo "### Operations added or changed upstream"
+            echo '```'
+            comm -13 fixture.ops live.ops
+            echo '```'
+            echo "### Operations removed or changed locally"
+            echo '```'
+            comm -23 fixture.ops live.ops
+            echo '```'
+          } > report.md
+          changed=false
+          cmp -s live.sorted.json fixture.sorted.json || changed=true
+          newer=false
+          [ "$newest" \> "${{ steps.crate.outputs.date }}" ] && newer=true
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "newer=$newer" >> "$GITHUB_OUTPUT"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update the issue
+        if: steps.diff.outputs.changed == 'true' || steps.diff.outputs.newer == 'true'
+        run: |
+          title="ESI spec drift"
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title==\"$title\"))[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file report.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file report.md
+          fi

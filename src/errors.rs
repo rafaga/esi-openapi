@@ -35,6 +35,17 @@ pub enum EsiError {
     /// [by reqwest]: https://docs.rs/reqwest/0.10.6/reqwest/struct.StatusCode.html#method.is_success
     #[error("Invalid HTTP status code received: {0}")]
     InvalidStatusCode(u16),
+    /// The resource was deleted. ESI keeps answering for it as a tombstone for
+    /// `tombstone_ttl_secs` seconds (`x-tombstone-ttl`), so this is not a plain
+    /// "not found". Only operations that declare a tombstone TTL return it, for
+    /// HTTP `404` and `410`.
+    #[error("The resource is gone (HTTP {status}); ESI keeps it as a tombstone for {tombstone_ttl_secs}s")]
+    Gone {
+        /// The HTTP status code of the response.
+        status: u16,
+        /// How long, in seconds, ESI keeps the tombstone.
+        tombstone_ttl_secs: i64,
+    },
     /// Error for if the provided user-agent header value has invalid characters.
     #[error("Invalid HTTP header value")]
     InvalidUserAgentHeader(#[from] http::header::InvalidHeaderValue),
