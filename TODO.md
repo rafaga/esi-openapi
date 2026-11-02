@@ -78,14 +78,6 @@ Modules in `src/groups` with no matching tag in the spec: `bookmarks`, `opportun
 
 - [x] Empty successful responses (e.g. `204 No Content`) are read as JSON `null`, so `()` return types work for write endpoints.
 
-## Suggested order
-
-1. **Phase 0** (above).
-2. **Public endpoints**, no auth needed: Status, Meta, Dogma, Wars, Sovereignty, Insurance, Routes, Freelance Jobs, Military Campaigns, remaining Universe, Market (groups, types), Contracts (public), Loyalty (offers), Industry (facilities), Paragon Hub and Cosmetics (public ones).
-3. **Authenticated character endpoints**: Skills, Character, Mail, Contacts, Calendar, Fittings, Fleets, Contracts, Planetary Interaction, Wallet, Loyalty, Access List, Activities.
-4. **Corporation / alliance endpoints** (many need `roles`): Corporation, Structures, Corporation Projects, Industry, Killmails, Market orders, Wallet.
-5. Write endpoints (PUT/POST/DELETE) last in each group, since they need the Phase 0 macros and are the riskiest to test live.
-
 ## Operations by group
 
 Legend: `[x]` implemented. Scope in parentheses; `roles` = `x-required-roles`; `paged` = `x-pagination`; `tombstone` = `x-tombstone-ttl`. Order within a group follows the path.
