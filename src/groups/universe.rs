@@ -436,6 +436,38 @@ pub struct SystemKills {
     pub system_id: i64,
 }
 
+/// The kills per system of the last hour, with the moment ESI computed them.
+///
+/// ESI refreshes this answer once an hour and only lists the systems that had
+/// kills; wormhole systems are not included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemKillsSnapshot {
+    /// The systems with kills.
+    pub data: Vec<SystemKills>,
+    /// The `Last-Modified` header as ESI sent it (an HTTP date, such as
+    /// `Wed, 21 Oct 2026 07:28:00 GMT`). The hour the data covers ends then.
+    pub last_modified: Option<String>,
+    /// The `ETag` header.
+    pub etag: Option<String>,
+}
+
+impl SystemKillsSnapshot {
+    /// Build a snapshot from the body and the headers of the answer.
+    fn from_response(data: Vec<SystemKills>, headers: &http::HeaderMap) -> Self {
+        let text = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        SystemKillsSnapshot {
+            data,
+            last_modified: text("last-modified"),
+            etag: text("etag"),
+        }
+    }
+}
+
 /// Which public structures to list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructureFilter {
@@ -628,6 +660,23 @@ impl UniverseGroup<'_> {
         RequestType::Public,
         Vec<SystemKills>,
     );
+
+    /// List the kills per system of the last hour together with the
+    /// `Last-Modified` and `ETag` headers of the answer.
+    ///
+    /// The hour the data covers ends at `last_modified`, which makes it
+    /// possible to tell two hourly answers apart and to store them without
+    /// counting one twice. ESI only refreshes the answer once an hour, so ask
+    /// again after `last_modified` plus one hour; with the cache enabled
+    /// ([`EsiBuilder::enable_cache`]) earlier calls cost no request.
+    pub async fn get_system_kills_snapshot(&self) -> EsiResult<SystemKillsSnapshot> {
+        let path = self.esi.get_endpoint_for_op_id("GetUniverseSystemKills")?;
+        let (data, headers): (Vec<SystemKills>, _) = self
+            .esi
+            .query_with_headers("GET", RequestType::Public, &path, None)
+            .await?;
+        Ok(SystemKillsSnapshot::from_response(data, &headers))
+    }
 
     api_post!(
         /// Resolve a list of IDs to names and categories.

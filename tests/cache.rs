@@ -70,6 +70,12 @@ impl LocalServer {
                             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                             body.len()
                         )
+                    } else if first_line.contains("/snapshot") {
+                        let body = r#"[{"npc_kills":5,"pod_kills":1,"ship_kills":2,"system_id":30000142}]"#;
+                        format!(
+                            "HTTP/1.1 200 OK\r\nETag: \"k1\"\r\nLast-Modified: Wed, 21 Oct 2026 07:28:00 GMT\r\nCache-Control: max-age=60\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
                     } else if first_line.contains("/gone") {
                         "HTTP/1.1 410 Gone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                             .to_owned()
@@ -141,6 +147,49 @@ async fn serves_fresh_entries_without_calling_the_server() {
         assert_eq!(pages, Some(4));
     }
     assert_eq!(server.count(), 1);
+}
+
+#[tokio::test]
+async fn query_with_headers_returns_the_headers_of_the_answer() {
+    let server = LocalServer::start().await;
+    let esi = Client::build(&server.url, true);
+    for _ in 0..2 {
+        let (data, headers): (Vec<serde_json::Value>, _) = esi
+            .query_with_headers("GET", RequestType::Public, "snapshot", None)
+            .await
+            .unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(
+            headers.get("last-modified").unwrap(),
+            "Wed, 21 Oct 2026 07:28:00 GMT"
+        );
+        assert_eq!(headers.get("etag").unwrap(), "\"k1\"");
+    }
+    assert_eq!(server.count(), 1, "the cached answer keeps its headers");
+}
+
+#[tokio::test]
+async fn the_system_kills_snapshot_carries_last_modified_and_etag() {
+    let server = LocalServer::start().await;
+    let spec: Spec = serde_json::from_str(
+        r#"{"paths": {"/snapshot": {"get": {"operationId": "GetUniverseSystemKills"}}}}"#,
+    )
+    .unwrap();
+    let esi = EsiBuilder::new()
+        .user_agent("snapshot test")
+        .base_api_url(&server.url)
+        .spec(Some(spec))
+        .build()
+        .unwrap();
+    let snapshot = esi.group_universe().get_system_kills_snapshot().await.unwrap();
+    assert_eq!(snapshot.data.len(), 1);
+    assert_eq!(snapshot.data[0].system_id, 30000142);
+    assert_eq!(snapshot.data[0].ship_kills, 2);
+    assert_eq!(
+        snapshot.last_modified.as_deref(),
+        Some("Wed, 21 Oct 2026 07:28:00 GMT")
+    );
+    assert_eq!(snapshot.etag.as_deref(), Some("\"k1\""));
 }
 
 #[tokio::test]
