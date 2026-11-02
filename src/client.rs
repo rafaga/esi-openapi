@@ -746,6 +746,43 @@ impl Esi {
         Ok((Self::parse_body(&text)?, Self::pages_header(&headers)))
     }
 
+    /// Like [`Esi::query`], but also returns the response headers.
+    ///
+    /// Use it when a header carries data the body lacks, such as
+    /// `Last-Modified` (the moment ESI computed the answer) or `ETag`. When the
+    /// answer comes from the cache, the headers are those stored with it.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # async fn run() {
+    /// # use esi_openapi::prelude::*;
+    /// # let esi = EsiBuilder::new()
+    /// #     .user_agent("some user agent")
+    /// #     .client_id("your_client_id")
+    /// #     .client_secret("your_client_secret")
+    /// #     .callback_url("your_callback_url")
+    /// #     .build()
+    /// #     .unwrap();
+    /// let (data, headers): (Vec<serde_json::Value>, _) = esi
+    ///     .query_with_headers("GET", RequestType::Public, "some/path", None)
+    ///     .await
+    ///     .unwrap();
+    /// let modified = headers.get("last-modified");
+    /// # }
+    /// ```
+    pub async fn query_with_headers<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        request_type: RequestType,
+        endpoint: &str,
+        query: Option<&[(&str, &str)]>,
+    ) -> EsiResult<(T, HeaderMap)> {
+        let (text, headers) = self
+            .send_request(method, request_type, endpoint, query, None)
+            .await?;
+        Ok((Self::parse_body(&text)?, headers))
+    }
+
     /// Fetch every page of an endpoint paginated with the `page` query
     /// parameter and return the items of all pages, in order.
     ///

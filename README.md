@@ -42,6 +42,7 @@ All 233 operations of the ESI OpenAPI spec (compatibility date `2026-08-18`) hav
 Beyond the endpoints:
 
 - `Esi::fetch_all_pages` and `Esi::fetch_all_cursor` walk paginated listings; `Esi::query_with_pages` also returns `X-Pages`.
+- `Esi::query_with_headers` is `query` plus the response headers (`Last-Modified`, `ETag`). `UniverseGroup::get_system_kills_snapshot` uses it to return the hourly kills per system together with those two headers, so each hourly answer can be told apart and stored.
 - `EsiBuilder::enable_cache(true)` turns on a response cache that revalidates with `ETag` / `Last-Modified` and honors `x-client-cache-ttl`. `cache_max_entries` and `cache_max_bytes` bound its size.
 - `Esi::post_chunked` and the bulk lookups (`get_affiliation`, `get_names`, asset names and locations) split lists longer than the spec's maximum into several requests.
 - `EsiBuilder::rate_limit_policy(RateLimitPolicy::Wait { .. } | Fail)` throttles requests against the rate limits ESI reports instead of provoking `429`s (off by default).

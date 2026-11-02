@@ -78,14 +78,6 @@ Modules in `src/groups` with no matching tag in the spec: `bookmarks`, `opportun
 
 - [x] Empty successful responses (e.g. `204 No Content`) are read as JSON `null`, so `()` return types work for write endpoints.
 
-## Suggested order
-
-1. **Phase 0** (above).
-2. **Public endpoints**, no auth needed: Status, Meta, Dogma, Wars, Sovereignty, Insurance, Routes, Freelance Jobs, Military Campaigns, remaining Universe, Market (groups, types), Contracts (public), Loyalty (offers), Industry (facilities), Paragon Hub and Cosmetics (public ones).
-3. **Authenticated character endpoints**: Skills, Character, Mail, Contacts, Calendar, Fittings, Fleets, Contracts, Planetary Interaction, Wallet, Loyalty, Access List, Activities.
-4. **Corporation / alliance endpoints** (many need `roles`): Corporation, Structures, Corporation Projects, Industry, Killmails, Market orders, Wallet.
-5. Write endpoints (PUT/POST/DELETE) last in each group, since they need the Phase 0 macros and are the riskiest to test live.
-
 ## Operations by group
 
 Legend: `[x]` implemented. Scope in parentheses; `roles` = `x-required-roles`; `paged` = `x-pagination`; `tombstone` = `x-tombstone-ttl`. Order within a group follows the path.
@@ -375,7 +367,7 @@ Legend: `[x]` implemented. Scope in parentheses; `roles` = `x-required-roles`; `
 - [x] `GET /universe/structures` — `GetUniverseStructures`
 - [x] `GET /universe/structures/{structure_id}` — `GetUniverseStructuresStructureId` (esi-universe.read_structures.v1)
 - [x] `GET /universe/system_jumps` — `GetUniverseSystemJumps`
-- [x] `GET /universe/system_kills` — `GetUniverseSystemKills`
+- [x] `GET /universe/system_kills` — `GetUniverseSystemKills` (also `get_system_kills_snapshot`, which returns `Last-Modified` and `ETag` with the data)
 - [x] `GET /universe/systems` — `GetUniverseSystems`
 - [x] `GET /universe/systems/{system_id}` — `GetUniverseSystemsSystemId`
 - [x] `GET /universe/types` — `GetUniverseTypes`
@@ -404,5 +396,7 @@ Legend: `[x]` implemented. Scope in parentheses; `roles` = `x-required-roles`; `
 ## Release housekeeping
 
 - [x] `CHANGELOG.md` updated for the 0.2.0 release and the README has a Coverage section.
+- [x] 0.2.1: dependency requirements relaxed to semver ranges to pick up patched releases (CVE-2026-111497, eMudhra); no API changes.
+- [x] 0.2.2: `Esi::query_with_headers` and `UniverseGroup::get_system_kills_snapshot` (`SystemKillsSnapshot`), covered by `tests/cache.rs`. Publishing is still a manual step (GitHub release and tag; `0.2.2` has no tag yet).
 - [x] Version 0.2.0 (breaking: integer types are `i64`, new macros and errors); `Cargo.toml` and `CHANGELOG.md` updated. Publishing is still a manual step (GitHub release).
 - [x] The alias table (`src/legacy.rs`) only maps rfesi IDs; a test checks every target exists in the spec and the table is smaller than the spec.

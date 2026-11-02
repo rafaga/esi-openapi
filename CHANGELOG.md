@@ -5,6 +5,19 @@ fork of [rfesi](https://github.com/Celeo/rfesi) 0.50.2; versioning restarts at 0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-01
+
+### Added
+
+- `Esi::query_with_headers`, like `query` but also returning the response headers (for `Last-Modified`, `ETag`).
+- `UniverseGroup::get_system_kills_snapshot` and `SystemKillsSnapshot`: the kills per system of the last hour together with the `Last-Modified` and `ETag` of the answer, so hourly answers can be told apart and stored.
+
+## [0.2.1] - 2026-10-26
+
+### Changed
+
+- Updated the dependencies to mitigate CVE-2026-111497 and the eMudhra certificate problem. The requirements in `Cargo.toml` are now semver ranges (`reqwest = "0.13"`) instead of exact patch versions, so a fresh resolve picks the patched releases, and the minimums of `http` (1.5), `tokio` (1.54) and `uuid` (1.29) were raised. No API changes.
+
 ## [0.2.0] - 2026-10-08
 
 ### Added
