@@ -181,7 +181,11 @@ async fn the_system_kills_snapshot_carries_last_modified_and_etag() {
         .spec(Some(spec))
         .build()
         .unwrap();
-    let snapshot = esi.group_universe().get_system_kills_snapshot().await.unwrap();
+    let snapshot = esi
+        .group_universe()
+        .get_system_kills_snapshot()
+        .await
+        .unwrap();
     assert_eq!(snapshot.data.len(), 1);
     assert_eq!(snapshot.data[0].system_id, 30000142);
     assert_eq!(snapshot.data[0].ship_kills, 2);

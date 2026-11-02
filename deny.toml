@@ -32,6 +32,14 @@ ignore = [
   # verification happens here. No fixed release exists (`patched = []`). Revisit
   # when `jsonwebtoken` moves to another backend or `rsa` ships a fix.
   { id = "RUSTSEC-2023-0071", reason = "rsa timing side channel; only reached through JWT validation, no private key operations, no fix available" },
+  # `crypto-bigint` 0.5.5 comes through `jsonwebtoken` (elliptic-curve -> p256 /
+  # p384), used only to validate EVE SSO tokens (feature `validate_jwt`). The
+  # advisory is about timing variability in constant-time operations on secret
+  # integers; here ECDSA only verifies signatures with public keys, so no secret
+  # value goes through it. The fix is `crypto-bigint` >= 0.7.6, which needs a new
+  # release of the RustCrypto elliptic-curve stack that `jsonwebtoken` has not
+  # taken yet (its update is a pending PR). Revisit when `jsonwebtoken` moves up.
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint timing variability; only reached through JWT signature verification with public keys, fixed upstream but jsonwebtoken has not updated yet" },
 ]
 
 
