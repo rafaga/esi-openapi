@@ -1,0 +1,21 @@
+{
+  "keys": [
+    {
+      "kty": "EC",
+      "alg": "ES256",
+      "crv": "P-256",
+      "kid": "ignored",
+      "use": "sig",
+      "x": "AAAA",
+      "y": "AAAA"
+    },
+    {
+      "kty": "RSA",
+      "alg": "RS256",
+      "kid": "JWT-Signature-Key",
+      "use": "sig",
+      "n": "1WRqVbsBuwvsoRnI3JClNtmoQq1woLXZY_AkFDD0BOQBggzFsxNXJdF-mAXAAKHFEDrwG6wgg6aPsIae3L-LUEEddv9hAlJAobnNrBITnb1DCN_eNKfE4cDin-Ad7-0O25HhWKBMs1cWZx4CL9t_oEGq9XtgxHk0JF0czBEIH9W5EVPjxPnyi8AoTNncYGWw9xJzhhjU3Qk0nx05UrCnpoNDqEmj5EDZlgDc3GWuhIr8Hzdw4tZKWXEsopVN8MDZS7TpqI0QXc28l5rfbm2C0LiGhEaBMmlWNTjQ88Rfxl9vvjMS9_lNlcIbZoQihT_QHdr2WhpoS0D7HcUBGJC2zqE56OQ3-eZ-pAEU_oHezawC3rZMX9vDbZSZYSgTxW_aNQwOchbcOaNPPbae9QOHPU-J6Uuz2ch9pkBPD-y5vhZ3-zV2w9z5Bfc4Q1sxxcNfYSjwq87TCBKIVoktXHW36caHGJd5M3KrwWhaJzx7RSlJVJdMREbF4QKsiGz3hSV7e-8AoDlXSWooivtHjZIfSh1xOyb_sHL0paesVd2eI72w4Khnq98BuQvv1hORdLipkk2VvAtyMmRYsDlXEZsq2IkXh_ucfWlq_7MjC25SCXymhY-1SNPOxMx_gvq3MkDz29BeaoyPNfwBEGtdRP5oI8iRwC1fj8FFeV4PuDjRKm0",
+      "e": "AQAB"
+    }
+  ]
+}

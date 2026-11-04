@@ -99,6 +99,12 @@ pub struct NewFitting {
     pub ship_type_id: i64,
 }
 
+/// The answer to saving a fitting.
+#[derive(Debug, Deserialize)]
+struct CreatedFitting {
+    fitting_id: i64,
+}
+
 impl FittingsGroup<'_> {
     api_get!(
         /// Return the fittings saved by a character.
@@ -109,15 +115,23 @@ impl FittingsGroup<'_> {
         (character_id: i64) => "{character_id}"
     );
 
-    api_post!(
-        /// Save a new fitting. Returns the ID of the created fitting.
-        create_character_fitting,
-        "PostCharactersCharacterIdFittings",
-        RequestType::Authenticated,
-        i64,
-        (character_id: i64) => "{character_id}",
+    /// Save a new fitting. Returns the ID of the created fitting.
+    pub async fn create_character_fitting(
+        &self,
+        character_id: i64,
         fitting: &NewFitting,
-    );
+    ) -> EsiResult<i64> {
+        let path = self
+            .esi
+            .get_endpoint_for_op_id("PostCharactersCharacterIdFittings")?
+            .replace("{character_id}", &character_id.to_string());
+        let body = serde_json::to_string(fitting)?;
+        let created: CreatedFitting = self
+            .esi
+            .query("POST", RequestType::Authenticated, &path, None, Some(&body))
+            .await?;
+        Ok(created.fitting_id)
+    }
 
     api_delete!(
         /// Delete a saved fitting.
@@ -143,6 +157,13 @@ mod fittings_tests {
         assert_eq!(fits[0].fitting_id, 3_000_000_000);
         assert_eq!(fits[0].items[0].flag, FittingFlag::HiSlot0);
         assert_eq!(fits[0].items[1].flag, FittingFlag::Unrecognized);
+    }
+
+    #[test]
+    fn test_parse_created_fitting() {
+        let created: CreatedFitting =
+            serde_json::from_str(r#"{"fitting_id": 3000000000}"#).unwrap();
+        assert_eq!(created.fitting_id, 3_000_000_000);
     }
 
     #[test]

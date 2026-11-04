@@ -5,6 +5,22 @@ fork of [rfesi](https://github.com/Celeo/rfesi) 0.50.2; versioning restarts at 0
 
 ## [Unreleased]
 
+### Fixed
+
+- Validating the SSO token now requires the `aud` claim to contain the client ID. Before, a token issued for another application was accepted, because every token lists `EVE Online` as an audience.
+- Requests with a body (`POST`, `PUT`) now send `Content-Type: application/json`; before, no content type was sent.
+- A client with an access token but no expiration no longer panics on an authenticated request: the token is sent and ESI decides whether it is still valid.
+- Validating the SSO token no longer panics on a malformed key set or on a token without an `iss` claim; both return `EsiError::InvalidJWT`. A failing status when fetching the keys is now reported as `EsiError::InvalidStatusCode`.
+- `FittingsGroup::create_character_fitting` reads the answer as the object ESI sends (`{"fitting_id": n}`); it was read as a bare number and failed on a real answer. The return type is still the `i64` ID.
+
+### Added
+
+- `EsiBuilder::metadata_url`: the address of the SSO metadata document that points to the token validation keys (default: the EVE SSO one), so the validated `authenticate` flow can run against a local server.
+
+### Changed
+
+- **Breaking:** fields that the spec does not mark as required are now `Option`: `ContainerLogEntry::password_type`, and `amount` plus `character_id` / `corporation_id` of the faction warfare leaderboard items (`CharacterLeaderboardItem`, `CorporationLeaderboardItem`). A real answer that omitted them failed to parse as a whole.
+
 ## [0.2.2] - 2026-11-01
 
 ### Added

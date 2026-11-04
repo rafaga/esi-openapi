@@ -31,6 +31,7 @@ use tokio::sync::RwLock;
 const BASE_URL: &str = "https://esi.evetech.net/";
 const AUTHORIZE_URL: &str = "https://login.eveonline.com/v2/oauth/authorize";
 const TOKEN_URL: &str = "https://login.eveonline.com/v2/oauth/token";
+const METADATA_URL: &str = "https://login.eveonline.com/.well-known/oauth-authorization-server";
 const SPEC_URL: &str = "https://esi.evetech.net/meta/openapi.json";
 const ERROR_LIMIT_REMAIN_HEADER: &str = "x-esi-error-limit-remain";
 const ERROR_LIMIT_RESET_HEADER: &str = "x-esi-error-limit-reset";
@@ -195,6 +196,7 @@ pub struct Esi {
     pub(crate) base_api_url: String,
     pub(crate) authorize_url: String,
     pub(crate) token_url: String,
+    pub(crate) metadata_url: String,
     pub(crate) spec_url: String,
     pub(crate) scope: String,
     pub(crate) application_auth: bool,
@@ -247,6 +249,7 @@ impl Esi {
             base_api_url: builder.base_api_url.unwrap_or(BASE_URL.to_string()),
             authorize_url: builder.authorize_url.unwrap_or(AUTHORIZE_URL.to_string()),
             token_url: builder.token_url.unwrap_or(TOKEN_URL.to_string()),
+            metadata_url: builder.metadata_url.unwrap_or(METADATA_URL.to_string()),
             spec_url: builder.spec_url.unwrap_or(SPEC_URL.to_string()),
             scope: builder.scope.unwrap_or_else(|| "".to_owned()),
             application_auth: builder.application_auth.unwrap_or(false),
@@ -560,6 +563,7 @@ impl Esi {
         let claim_data = Some(
             crate::jwt_util::validate_jwt(
                 &self.client,
+                &self.metadata_url,
                 &data.access_token,
                 self.client_id.as_ref().unwrap(),
             )
@@ -984,7 +988,9 @@ impl Esi {
             .headers(headers)
             .query(query.unwrap_or(&[]));
         req_builder = match body {
-            Some(b) => req_builder.body(b.to_owned()),
+            Some(b) => req_builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(b.to_owned()),
             None => req_builder,
         };
         let req = req_builder.build()?;
@@ -1125,8 +1131,12 @@ impl Esi {
         if self.access_token.is_none() {
             return Err(EsiError::MissingAuthentication);
         }
-        if self.access_expiration.unwrap() < current_time_millis()? {
-            return Err(EsiError::AccessTokenExpired);
+        // A token given without an expiration can't be judged here: send it and
+        // let ESI answer if it is no longer valid.
+        if let Some(expiration) = self.access_expiration {
+            if expiration < current_time_millis()? {
+                return Err(EsiError::AccessTokenExpired);
+            }
         }
         Ok(())
     }
@@ -1135,9 +1145,10 @@ impl Esi {
     /// and the compatibility date.
     fn request_headers(&self, request_type: &RequestType) -> EsiResult<HeaderMap> {
         let mut map = HeaderMap::new();
-        // The 'user-agent' and 'content-type' headers are set in the default headers
-        // from the builder, so all that's required here is to set the authorization
-        // header, if present, and the compatibility date.
+        // The 'user-agent' and 'accept' headers are set in the default headers
+        // from the builder (and 'content-type', when there is a body, in
+        // `send_request`), so all that's required here is to set the
+        // authorization header, if present, and the compatibility date.
         if *request_type == RequestType::Authenticated {
             if let Some(at) = &self.access_token {
                 map.insert(
