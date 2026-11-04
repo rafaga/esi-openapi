@@ -73,6 +73,7 @@ pub struct EsiBuilder {
     pub(crate) base_api_url: Option<String>,
     pub(crate) authorize_url: Option<String>,
     pub(crate) token_url: Option<String>,
+    pub(crate) metadata_url: Option<String>,
     pub(crate) spec_url: Option<String>,
     pub(crate) scope: Option<String>,
     pub(crate) access_token: Option<String>,
@@ -192,6 +193,13 @@ impl EsiBuilder {
         self
     }
 
+    /// Set the URL of the SSO metadata document, which points to the keys that
+    /// validate the access token (only used with the "validate_jwt" feature).
+    pub fn metadata_url(mut self, val: &str) -> Self {
+        self.metadata_url = Some(val.to_owned());
+        self
+    }
+
     /// Set the spec_url.
     pub fn spec_url(mut self, val: &str) -> Self {
         self.spec_url = Some(val.to_owned());
@@ -274,7 +282,6 @@ impl EsiBuilder {
         let builder = Client::builder()
             .timeout(http_timeout)
             .default_headers(headers);
-        #[cfg(feature = "rustls-tls")]
         let builder = builder.tls_backend_rustls();
         Ok(builder.build()?)
     }
@@ -405,6 +412,10 @@ mod tests {
             "https://login.eveonline.com/v2/oauth/authorize"
         );
         assert_eq!(b.token_url, "https://login.eveonline.com/v2/oauth/token");
+        assert_eq!(
+            b.metadata_url,
+            "https://login.eveonline.com/.well-known/oauth-authorization-server"
+        );
         assert_eq!(b.spec_url, "https://esi.evetech.net/meta/openapi.json");
         assert_eq!(b.compatibility_date, "2026-08-18");
         assert_eq!(b.access_token, None);
@@ -418,6 +429,7 @@ mod tests {
             .base_api_url("http://eve-api/")
             .authorize_url("http://authorize-url/")
             .token_url("http://token-url")
+            .metadata_url("http://metadata-url")
             .spec_url("http://spec-url/")
             .build()
             .unwrap();
@@ -425,6 +437,7 @@ mod tests {
         assert_eq!(b.base_api_url, "http://eve-api/");
         assert_eq!(b.authorize_url, "http://authorize-url/");
         assert_eq!(b.token_url, "http://token-url");
+        assert_eq!(b.metadata_url, "http://metadata-url");
         assert_eq!(b.spec_url, "http://spec-url/");
     }
 
@@ -450,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_builder_to_json_empty() {
-        let json = r#"{"compatibility_date":null,"client_id":null,"client_secret":null,"application_auth":null,"callback_url":null,"base_api_url":null,"authorize_url":null,"token_url":null,"spec_url":null,"scope":null,"access_token":null,"access_expiration":null,"refresh_token":null,"user_agent":null,"http_timeout":null,"spec":null}"#;
+        let json = r#"{"compatibility_date":null,"client_id":null,"client_secret":null,"application_auth":null,"callback_url":null,"base_api_url":null,"authorize_url":null,"token_url":null,"metadata_url":null,"spec_url":null,"scope":null,"access_token":null,"access_expiration":null,"refresh_token":null,"user_agent":null,"http_timeout":null,"spec":null}"#;
         assert_eq!(json, serde_json::to_string(&EsiBuilder::new()).unwrap());
     }
 

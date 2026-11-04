@@ -30,8 +30,8 @@ pub struct FWLeaderboards {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct CharacterLeaderboardItem {
-    pub amount: i64,
-    pub character_id: i64,
+    pub amount: Option<i64>,
+    pub character_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,8 +52,8 @@ pub struct FWCharacterLeaderboards {
 #[derive(Debug, Deserialize)]
 #[allow(missing_docs)]
 pub struct CorporationLeaderboardItem {
-    pub amount: i64,
-    pub corporation_id: i64,
+    pub amount: Option<i64>,
+    pub corporation_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

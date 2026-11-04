@@ -317,7 +317,8 @@ pub struct Bloodline {
     pub name: String,
     pub perception: i64,
     pub race_id: i64,
-    pub ship_type_id: i64,
+    // The spec requires it, but ESI sends `null` for some bloodlines.
+    pub ship_type_id: Option<i64>,
     pub willpower: i64,
 }
 
@@ -690,7 +691,7 @@ impl UniverseGroup<'_> {
 
 #[cfg(test)]
 mod new_endpoint_tests {
-    use super::{NameCategory, ResolvedName, Star, StructureFilter};
+    use super::{Bloodline, NameCategory, ResolvedName, Star, StructureFilter};
 
     #[test]
     fn test_parse_star_with_large_values() {
@@ -700,6 +701,22 @@ mod new_endpoint_tests {
         let star: Star = serde_json::from_str(json).unwrap();
         assert_eq!(star.radius, 2_284_000_000);
         assert_eq!(star.spectral_class, "K2 V");
+    }
+
+    #[test]
+    fn test_parse_bloodlines_with_a_null_ship_type() {
+        // ESI sends `null` for the ship of some bloodlines, although the spec
+        // requires it.
+        let json = r#"[
+            {"bloodline_id": 5, "charisma": 3, "corporation_id": 1000066, "description": "d",
+             "intelligence": 7, "memory": 5, "name": "Amarr", "perception": 6, "race_id": 4,
+             "ship_type_id": 596, "willpower": 10},
+            {"bloodline_id": 9, "charisma": 3, "corporation_id": 1000066, "description": "d",
+             "intelligence": 7, "memory": 5, "name": "Other", "perception": 6, "race_id": 4,
+             "ship_type_id": null, "willpower": 10}]"#;
+        let bloodlines: Vec<Bloodline> = serde_json::from_str(json).unwrap();
+        assert_eq!(bloodlines[0].ship_type_id, Some(596));
+        assert_eq!(bloodlines[1].ship_type_id, None);
     }
 
     #[test]

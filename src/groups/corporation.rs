@@ -131,8 +131,8 @@ pub struct ContainerLogEntry {
     pub new_config_bitmask: Option<i64>,
     /// Configuration bitmask before the change.
     pub old_config_bitmask: Option<i64>,
-    /// Kind of password involved.
-    pub password_type: ContainerPasswordType,
+    /// Kind of password involved (only for the password actions).
+    pub password_type: Option<ContainerPasswordType>,
     /// Quantity moved.
     pub quantity: Option<i64>,
     /// Type ID of the item moved.
@@ -863,6 +863,7 @@ mod corporation_management_tests {
         )
         .unwrap();
         assert_eq!(l[0].action, ContainerAction::EnterPassword);
+        assert_eq!(l[0].password_type, Some(ContainerPasswordType::Config));
         let t: Vec<CorporationTitle> =
             serde_json::from_str(r#"[{"title_id": 1, "name": "CEO", "roles": ["Director"]}]"#)
                 .unwrap();
