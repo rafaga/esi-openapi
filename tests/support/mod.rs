@@ -93,6 +93,16 @@ impl Reply {
         }
     }
 
+    /// No answer at all: the server reads the request and keeps the connection
+    /// open without writing, to test timeouts.
+    pub fn never() -> Self {
+        Self {
+            status: 0,
+            headers: Vec::new(),
+            body: String::new(),
+        }
+    }
+
     /// An empty answer with the given status.
     pub fn status(status: u16) -> Self {
         Self {
@@ -109,6 +119,9 @@ impl Reply {
 
     /// The raw answer; `{base}` in the body stands for the address of the server.
     fn render(&self, base: &str) -> String {
+        if self.status == 0 {
+            return String::new();
+        }
         let body = self.body.replace("{base}", base);
         let mut text = format!("HTTP/1.1 {} Test\r\n", self.status);
         for (name, value) in &self.headers {
@@ -138,13 +151,32 @@ impl Server {
     /// A server with a reply per path prefix; the first prefix that matches
     /// wins and a path that matches none gets a `404`.
     pub async fn routes(routes: Vec<(&str, Reply)>) -> Self {
+        Self::launch(
+            routes
+                .into_iter()
+                .map(|(prefix, reply)| (prefix, vec![reply]))
+                .collect(),
+        )
+        .await
+    }
+
+    /// A server that answers the first request with the first reply, the
+    /// second with the second, and so on; the last reply repeats.
+    pub async fn sequence(replies: Vec<Reply>) -> Self {
+        Self::launch(vec![("/", replies)]).await
+    }
+
+    async fn launch(routes: Vec<(&str, Vec<Reply>)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
-        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests: Arc<Mutex<Vec<Recorded>>> = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&requests);
-        let answers: Vec<(String, String)> = routes
+        let answers: Vec<(String, Vec<String>)> = routes
             .into_iter()
-            .map(|(prefix, reply)| (prefix.to_owned(), reply.render(&url)))
+            .map(|(prefix, replies)| {
+                let texts = replies.iter().map(|reply| reply.render(&url)).collect();
+                (prefix.to_owned(), texts)
+            })
             .collect();
         tokio::spawn(async move {
             loop {
@@ -154,11 +186,27 @@ impl Server {
                 tokio::spawn(async move {
                     let raw = Self::read_request(&mut socket).await;
                     let recorded = Recorded::parse(&raw);
-                    let answer = answers
-                        .iter()
-                        .find(|(prefix, _)| recorded.path().starts_with(prefix.as_str()))
-                        .map_or_else(|| Reply::status(404).render(""), |(_, text)| text.clone());
-                    seen.lock().unwrap().push(recorded);
+                    let answer = {
+                        let mut recorded_so_far = seen.lock().unwrap();
+                        let route = answers
+                            .iter()
+                            .find(|(prefix, _)| recorded.path().starts_with(prefix.as_str()));
+                        let answer = route.map_or_else(
+                            || Reply::status(404).render(""),
+                            |(prefix, texts)| {
+                                let before = recorded_so_far
+                                    .iter()
+                                    .filter(|request| request.path().starts_with(prefix.as_str()))
+                                    .count();
+                                texts[before.min(texts.len() - 1)].clone()
+                            },
+                        );
+                        recorded_so_far.push(recorded);
+                        answer
+                    };
+                    if answer.is_empty() {
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
                     let _ = socket.write_all(answer.as_bytes()).await;
                 });
             }
