@@ -282,7 +282,6 @@ impl EsiBuilder {
         let builder = Client::builder()
             .timeout(http_timeout)
             .default_headers(headers);
-        #[cfg(feature = "rustls-tls")]
         let builder = builder.tls_backend_rustls();
         Ok(builder.build()?)
     }
