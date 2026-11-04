@@ -7,6 +7,7 @@ fork of [rfesi](https://github.com/Celeo/rfesi) 0.50.2; versioning restarts at 0
 
 ### Fixed
 
+- `UniverseGroup::get_bloodlines` no longer fails as a whole: ESI sends `null` as the `ship_type_id` of six bloodlines although the spec requires it, so `Bloodline::ship_type_id` is now `Option<i64>` (**breaking** for code that reads it).
 - Validating the SSO token now requires the `aud` claim to contain the client ID. Before, a token issued for another application was accepted, because every token lists `EVE Online` as an audience.
 - Requests with a body (`POST`, `PUT`) now send `Content-Type: application/json`; before, no content type was sent.
 - A client with an access token but no expiration no longer panics on an authenticated request: the token is sent and ESI decides whether it is still valid.
